@@ -1,3 +1,4 @@
+import { refreshStationGeography } from './world.js';
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,7 @@ function load() {
     if (saved.version !== 2) return fresh();
     saved.planRev = (saved.planRev || 0) + 1;
     delete saved.version;
+    refreshStationGeography(saved);
     // Пока сервер не работал, жизнь шла: догоняем реальное время (не больше суток).
     const gap = (Date.now() - saved.now) / 60_000;
     if (gap > 0) {
@@ -97,7 +99,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET') return json(res, 405, { error: 'Метод не поддерживается' });
     if (url.pathname === '/healthz') return json(res, 200, { ok: true });
     // Движок расчёта открыт клиенту: страница «Как это работает» запускает его в песочнице.
-    if (['/engine/model.js', '/engine/dispatch.js', '/engine/world.js'].includes(url.pathname)) {
+    if (['/engine/model.js', '/engine/dispatch.js', '/engine/world.js', '/engine/rail-corridor.js'].includes(url.pathname)) {
       const body = await readFile(fileURLToPath(new URL(`./${path.basename(url.pathname)}`, import.meta.url)));
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
       return res.end(body);

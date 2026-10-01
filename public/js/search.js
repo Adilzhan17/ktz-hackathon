@@ -18,7 +18,7 @@ export function QuickSearch({ data, open, onClose }) {
   const stations = q ? data.stations.filter(s => `${s.id} ${s.name}`.toLocaleLowerCase('ru').includes(q)).slice(0, 6) : [];
   const selectTrain = t => { updateUi({ category: 'all', selectedTrain: t.number, windowStart: Math.max(0, t.forecast[0][0] - 30) }); onClose(); go('/'); };
   return html`<${Dialog} id="quick-search" open=${open} onClose=${onClose} title="Найти поезд или станцию">
-    <label class="search quick-input"><${Icon} name="search" size=${18} /><span class="sr-only">Номер поезда или название станции</span><input ref=${input} type="search" placeholder="Например, 153 или Казан" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
+    <label class="search quick-input"><${Icon} name="search" size=${18} /><span class="sr-only">Номер поезда или название станции</span><input ref=${input} type="search" placeholder="Например, 153 или Дария" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
     <div class="quick-results">
       ${!q && html`<p class="search-hint">Введите номер поезда, его категорию или название станции. Поезд откроется на графике, станция — с данными грузовой работы.</p>`}
       ${q && !trains.length && !stations.length && html`<p role="status" class="search-hint">Ничего не найдено. Проверьте номер или сократите название станции.</p>`}
