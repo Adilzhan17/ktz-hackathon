@@ -16,17 +16,28 @@ function buildTasks(data, nowMs) {
   if (data.blocked && !data.planApproved) {
     const sel = d.variants.find(v => v.id === d.selected);
     tasks.push({ id: 'approve', tone: 'danger', icon: 'siren', title: 'Подтвердите вариант пропуска',
-      text: `Закрыт нечётный путь D–E, ${count(d.conflicts.length, ['конфликт', 'конфликта', 'конфликтов'])}. Выбран «${sel.name}»${sel.recommended ? ' (рекомендован)' : ''}: пассажирские +${sel.metrics.passenger} мин, всего +${sel.metrics.total} мин.`,
+      text: `${count(d.closures.length, ['закрытие пути', 'закрытия пути', 'закрытий пути'])}, ${count(d.conflicts.length, ['конфликт', 'конфликта', 'конфликтов'])}. Выбран «${sel.name}»${sel.recommended ? ' (рекомендован)' : ''}: пассажирские +${sel.metrics.passenger} мин, всего +${sel.metrics.total} мин.${data.auto.approve ? ' Автопилот применит рекомендацию через 15 минут.' : ''}`,
       actions: [{ label: 'Подтвердить', icon: 'check', variant: 'primary', run: () => act({ type: 'approve' }) }, { label: 'Варианты', icon: 'split', run: () => go('/decisions') }] });
   }
-  const stopped = placeTrains(data, tMin).filter(r => r.stopped).sort((a, b) => b.waitedMin - a.waitedMin);
+  for (const t of data.trains.filter(t => t.broken && tMin >= t.broken.from)) {
+    const inc = data.incidents.find(i => i.id === t.broken.id);
+    tasks.push({ id: `bd${t.number}`, tone: 'danger', icon: 'ambulance', title: t.broken.label,
+      text: `${data.breakdownLevels[t.broken.level].text}${t.broken.until != null ? ` Устранение до ${clockAt(data, t.broken.until)}.` : ''}`,
+      actions: [...(t.broken.level >= 2 && inc ? [{ label: 'Устранить досрочно', icon: 'zap', run: () => act({ type: 'reopen', id: inc.id }) }] : []), { label: 'Показать', icon: 'eye', variant: 'ghost', run: () => pick(t.number) }] });
+  }
+  for (const c of d.closures.filter(c => c.from > tMin && c.from - tMin <= 60 && !c.train)) {
+    tasks.push({ id: `win${c.id}`, tone: 'accent', icon: 'construction', title: `Через ${Math.round(c.from - tMin)} мин: ${c.label.toLowerCase()}`,
+      text: `Перегон ${data.stations[c.segment].id}–${data.stations[c.segment + 1].id}, ${{ odd: 'нечётный путь', even: 'чётный путь', both: 'оба пути' }[c.track]} до ${c.until == null ? 'отмены' : clockAt(data, c.until)}.`, info: true,
+      actions: [{ label: 'Решения', icon: 'scale', variant: 'ghost', run: () => go('/decisions') }] });
+  }
+  const stopped = placeTrains(data, tMin).filter(r => r.stopped && !r.broken).sort((a, b) => b.waitedMin - a.waitedMin);
   for (const r of stopped) {
     const t = r.t;
     const acts = [{ label: 'Показать', icon: 'eye', variant: 'ghost', run: () => pick(t.number) }];
     if (r.held) acts.unshift({ label: 'Отпустить', icon: 'play', run: () => act({ type: 'release', train: t.number }) });
     else if (!t.overridden && t.basePriority > 1) acts.unshift({ label: 'Пропустить первым', icon: 'zap', run: () => act({ type: 'expedite', train: t.number }) });
     tasks.push({ id: `stop${t.number}`, tone: 'danger', icon: 'hourglass', title: `№${t.number} стоит на «${data.stations[r.loc.idx].name}» ${r.waitedMin} мин`,
-      text: `${t.label}: ${r.reason}. Отправление по плану через ${r.restMin} мин.`, actions: acts });
+      text: `${t.label}: ${r.reason}.${r.restMin != null ? ` Отправление по плану через ${r.restMin} мин.` : ''}`, actions: acts });
   }
   for (const g of data.groups.filter(g => g.status === 'approaching' && g.etaAt <= nowMs)) {
     tasks.push({ id: `grp${g.id}`, tone: 'accent', icon: 'package', title: `Вагоны прибыли на «${data.stations.find(s => s.id === g.stationId).name}»: №${g.train}`,
@@ -54,33 +65,63 @@ function Task({ t }) {
   </li>`;
 }
 
+const LEVELS = [1, 2, 3, 4];
+const Fact = ({ icon, label, value, bad }) => html`<div class=${`fact ${bad ? 'bad' : ''}`}><${Icon} name=${icon} size=${16} /><span>${label}</span><strong>${value}</strong></div>`;
+
 function TrainTab({ data, nowMs }) {
   const [mins, setMins] = useState(10);
+  const [level, setLevel] = useState(2);
+  const [kind, setKind] = useState('');
   const n = app.ui.selectedTrain;
   const t = n && data.trains.find(x => x.number === n);
-  if (!t) return html`<${Empty} icon="mouse-pointer-click" title="Выберите поезд">Нажмите на поезд на схеме или в списке задач. Здесь появятся команды: задержать на станции, пропустить первым.</${Empty}>`;
+  if (!t) return html`<${Empty} icon="mouse-pointer-click" title="Выберите поезд">Нажмите на поезд на схеме или в списке задач. Здесь появятся его характеристики, ТО и команды: задержать, пропустить первым, спроецировать поломку.</${Empty}>`;
   const tMin = (nowMs - data.baseTime) / 60000;
   const rec = placeTrains(data, tMin).find(r => r.t.number === n);
   const holds = data.holds.filter(h => h.train === n);
-  const done = tMin > t.forecast.at(-1)[0] + 8;
+  const done = tMin > t.forecast.at(-1)[0] + 8 && !t.disabled;
   const noStop = tMin >= t.forecast.at(-1)[0];
+  const ts = t.techState;
+  const types = Object.entries(data.breakdownTypes).filter(([, v]) => v.levels.includes(level));
+  const kindOk = types.some(([k]) => k === kind) ? kind : types[0]?.[0];
+  const onLineNow = Boolean(rec) && !rec.service;
   return html`<div class="train-ctl">
     <div class="tc-head"><strong class="tc-num">№${t.number}</strong><${Badge} tone=${PRIORITY[t.priority].tone}>${t.label}</${Badge}>
       ${t.overridden && html`<${Badge} tone="accent" icon="zap">пропускается первым</${Badge}>`}
-      <${Badge} tone=${t.delay > 0 ? 'danger' : 'neutral'}>${delayText(t.delay)}</${Badge}></div>
-    <p class="tc-status">${rec ? describeTrain(data, rec, tMin) : done ? 'Поезд прибыл и ушёл с линии.' : `Ещё не вышел: отправление в ${clockAt(data, t.forecast[0][0])} со станции «${data.stations[t.forecast[0][1]].name}».`}</p>
-    <dl class="inline-dl"><div><dt>Направление</dt><dd>${DIRECTION[t.direction]}</dd></div><div><dt>Маршрут</dt><dd>${data.stations[t.route[0][1]].name} → ${data.stations[t.route.at(-1)[1]].name}</dd></div>
-      <div><dt>Вагонов</dt><dd>${t.wagons}</dd></div><div><dt>Прибытие: график / прогноз</dt><dd>${clockAt(data, t.route.at(-1)[0])} / ${clockAt(data, t.forecast.at(-1)[0])}</dd></div></dl>
+      ${t.broken && html`<${Badge} tone="danger" icon="ambulance">${data.breakdownLevels[t.broken.level].name} поломка</${Badge}>`}
+      <${Badge} tone=${t.delay > 0 || t.disabled ? 'danger' : 'neutral'}>${t.disabled ? 'снят с рейса' : delayText(t.delay)}</${Badge}></div>
+    <p class="tc-status">${rec ? describeTrain(data, rec, tMin) : done ? 'Поезд прибыл и ушёл с линии.' : `Ещё не вышел: отправление в ${clockAt(data, t.forecast[0][0])} со станции «${data.stations[Math.round(t.forecast[0][1])].name}».`}</p>
+    <div class="facts" aria-label="Характеристики поезда">
+      <${Fact} icon="truck" label="Локомотив" value=${`${t.loco.series} №${t.loco.number}`} />
+      <${Fact} icon="zap" label="Мощность" value=${`${t.loco.powerKw} кВт, ${t.loco.type}`} />
+      <${Fact} icon="package" label=${t.category === 'passenger' ? 'Заполнение' : 'Загрузка'} value=${`${t.loadPct}%${t.cargo ? ` · ${data.cargoNames[t.cargo].toLowerCase()}` : ''}`} />
+      <${Fact} icon="weight" label="Масса брутто" value=${`${t.grossT} т`} />
+      <${Fact} icon="ruler" label="Длина / вагонов" value=${`${t.lengthM} м / ${t.wagons}`} />
+      <${Fact} icon="gauge" label="Скорость ср. / макс." value=${`${t.avgKmh} / ${t.maxKmh} км/ч`} />
+      <${Fact} icon="activity" label="Осевая нагрузка" value=${`${t.axleLoadT} т`} />
+      <${Fact} icon="user-round" label="Бригада за рулём" value=${`${ts.crewOnDutyH} ч, отдых через ${ts.crewRestInH} ч`} bad=${ts.crewRestInH < 1.5} />
+      <${Fact} icon="wrench" label="Техобслуживание" value=${`${ts.status} · с ТО ${ts.hoursSince} ч из ${t.tech.intervalH}`} bad=${ts.status === 'скоро ТО'} />
+      <${Fact} icon="heart-pulse" label="Тех. состояние" value=${`${ts.conditionPct}%`} bad=${ts.conditionPct < 55} />
+      ${ts.fuelPct !== null && html`<${Fact} icon="fuel" label="Топливо" value=${`${ts.fuelPct}%`} bad=${ts.fuelPct < 25} />`}
+      <${Fact} icon="route" label="Маршрут" value=${`${data.stations[t.route[0][1]].name} → ${data.stations[t.route.at(-1)[1]].name}`} />
+    </div>
     <div class="tc-block"><h3>Задержать на ближайшей станции</h3>
       <div class="btn-row"><${Segmented} label="Минут" value=${mins} options=${HOLDS} onChange=${setMins} />
-        <${Button} icon="hourglass" disabled=${done || noStop} reason=${done ? 'Поезд уже прибыл' : 'Дальше только конечная станция'} onClick=${() => act({ type: 'hold', train: n, minutes: mins })}>Задержать на ${mins} мин</${Button}></div>
+        <${Button} icon="hourglass" disabled=${done || noStop || t.disabled} reason=${done ? 'Поезд уже прибыл' : t.disabled ? 'Поезд снят с рейса' : 'Дальше только конечная станция'} onClick=${() => act({ type: 'hold', train: n, minutes: mins })}>Задержать на ${mins} мин</${Button}></div>
       ${holds.length > 0 && html`<ul class="holds">${holds.map(h => html`<li key=${h.station}><${Icon} name="hourglass" size=${15} /><span>«${data.stations[h.station].name}» · ${h.minutes} мин</span></li>`)}
         <li><${Button} size="sm" variant="ghost" icon="x" onClick=${() => act({ type: 'release', train: n })}>Снять задержки</${Button}></li></ul>`}</div>
     <div class="tc-block"><h3>Очерёдность на перегонах</h3>
       ${t.overridden
         ? html`<${Button} icon="undo-2" onClick=${() => act({ type: 'restore', train: n })}>Вернуть исходный приоритет</${Button}>`
-        : html`<${Button} icon="zap" disabled=${t.basePriority === 1 || done} reason=${t.basePriority === 1 ? 'Пассажирский уже идёт первым' : 'Поезд уже прибыл'} onClick=${() => act({ type: 'expedite', train: n })}>Пропустить первым</${Button}>`}
+        : html`<${Button} icon="zap" disabled=${t.basePriority === 1 || done || t.disabled} reason=${t.basePriority === 1 ? 'Пассажирский уже идёт первым' : 'Поезд не на линии'} onClick=${() => act({ type: 'expedite', train: n })}>Пропустить первым</${Button}>`}
       <small>Повышает приоритет до пассажирского: при конфликте на закрытом перегоне поезд пойдёт раньше, остальные подождут.</small></div>
+    <div class="tc-block breakdown"><h3>Спроецировать поломку</h3>
+      <div class="levels" role="radiogroup" aria-label="Уровень поломки">${LEVELS.map(l => html`<button type="button" role="radio" aria-checked=${level === l} key=${l} class=${`level l${l} ${level === l ? 'on' : ''}`} onClick=${() => setLevel(l)}>
+        <strong>${l}. ${data.breakdownLevels[l].name}</strong><small>${data.breakdownLevels[l].short}</small></button>`)}</div>
+      <p class="muted">${data.breakdownLevels[level].text}</p>
+      <div class="field-row"><label>Неисправность
+        <select value=${kindOk} onChange=${e => setKind(e.target.value)} aria-label="Вид неисправности">${types.map(([k, v]) => html`<option key=${k} value=${k}>${v.name}</option>`)}</select></label>
+        <${Button} variant="danger-outline" icon="ambulance" disabled=${!onLineNow || Boolean(t.broken)} reason=${t.broken ? 'С этим поездом уже случилась поломка' : 'Поезд сейчас не на линии'}
+          onClick=${() => act({ type: 'breakdown', train: n, level, kind: kindOk })}>Спроецировать</${Button}></div></div>
   </div>`;
 }
 

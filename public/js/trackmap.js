@@ -1,22 +1,24 @@
 import { stationTraffic, blockOccupancy } from './station-metrics.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { html, Icon, clockAt, time, delayText, duration, PRIORITY, DIRECTION } from './lib.js';
+import { html, Icon, clockAt, time, dateLong, delayText, duration, PRIORITY, DIRECTION } from './lib.js';
 import { app, act, go, href, updateUi, useLiveNow, liveNow, clock } from './store.js';
 import { Button, Badge, Segmented } from './ui.js';
 
-// ---- геометрия схемы (условные единицы; SVG масштабируется по ширине) ----
-const MARGIN = 90, STEP = 140, H = 440, HALF = 40, CARGO_Y = 330;
-const Y_ODD = 176, Y_EVEN = 240;           // главные пути: сверху нечётный (←), снизу чётный (→)
-const TRAIN_W = 58, TRAIN_H = 20;
+// ---- геометрия схемы (условные единицы; SVG масштабируется) ----
+const MARGIN = 100, STEP = 150, H = 478, HALF = 42, CARGO_Y = 348;
+const Y_ODD = 188, Y_EVEN = 254;           // главные пути: сверху нечётный (←), снизу чётный (→)
+const TRAIN_W = 64, TRAIN_H = 22;
 const stationX = i => MARGIN + i * STEP;
-const SPEEDS = [{ value: 1, label: '1' }, { value: 3, label: '3' }, { value: 10, label: '10' }, { value: 30, label: '30' }];
+const SPEEDS = [{ value: 1, label: 'Реальное' }, { value: 60, label: '×60' }, { value: 180, label: '×180' }, { value: 600, label: '×600' }];
+const ZOOMS = [{ value: 'fit', label: 'Весь участок' }, { value: '1', label: 'Обычный' }, { value: '1.35', label: 'Крупно' }];
 const FILL = { 1: 'var(--accent)', 2: '#2c5770', 3: '#667f90' };
 
-/** Где поезд в момент tMin (минуты смены): движется по перегону, ждёт на станции или уже прибыл. */
-export function describeTrain(data, rec, tMin) { return trainStatus(data, rec, tMin); }
+/** Где поезд в момент tMin (минуты от начала суток модели): ТО перед рейсом, в пути, стоит или прибыл. */
 export function locate(train, tMin) {
   const pts = train.forecast;
-  if (tMin < pts[0][0] || tMin > pts.at(-1)[0] + 8) return null;
+  if (train.service && tMin >= train.service.from && tMin < pts[0][0]) return { kind: 'service', idx: pts[0][1], since: train.service.from, until: pts[0][0] };
+  if (tMin < pts[0][0]) return null;
+  if (tMin > pts.at(-1)[0] + (train.disabled ? 0 : 8)) return null;
   for (let k = 1; k < pts.length; k++) {
     if (tMin <= pts[k][0]) {
       const [t0, i0] = pts[k - 1], [t1, i1] = pts[k];
@@ -27,12 +29,16 @@ export function locate(train, tMin) {
   return { kind: 'arrived', idx: pts.at(-1)[1] };
 }
 
-/** Кто занимает закрытый перегон в момент tMin (для объяснения, почему другой стоит). */
+const segOf = (a, b) => Math.floor(Math.min(a, b) + 1e-9);
+const closureAt = (data, seg, t) => data.dispatch.closures.find(c => c.segment === seg && t >= c.from && (c.until == null || t < c.until));
+export const describeTrain = (data, rec, tMin) => trainStatus(data, rec, tMin);
+
+/** Кто занимает перегон в момент tMin (для объяснения, почему другой стоит). */
 function blockerOf(data, tMin, seg, exceptNumber) {
   for (const t of data.trains) {
     if (t.number === exceptNumber) continue;
     const loc = locate(t, tMin);
-    if (loc?.kind === 'move' && Math.min(loc.from, loc.to) === seg) return t;
+    if (loc?.kind === 'move' && segOf(loc.from, loc.to) === seg) return t;
   }
   return null;
 }
@@ -40,37 +46,55 @@ function blockerOf(data, tMin, seg, exceptNumber) {
 /** Положения всех поездов на схеме и их состояние. */
 export function placeTrains(data, tMin) {
   const out = [];
-  const seg = data.dispatch.closedSegment;
   const slots = new Map();
+  const last = data.stations.length - 1;
   for (const t of data.trains) {
     const loc = locate(t, tMin);
     if (!loc) continue;
     const odd = t.direction === 'odd';
-    const rec = { t, loc, odd, stopped: false, wrong: false, x: 0, y: odd ? Y_ODD : Y_EVEN, reason: '', segment: null };
+    const broken = Boolean(t.broken && tMin >= t.broken.from);
+    const rec = { t, loc, odd, stopped: false, wrong: false, planned: false, service: false, broken, mid: false, held: false, x: 0, y: odd ? Y_ODD : Y_EVEN, reason: '', segment: null };
     if (loc.kind === 'move') {
-      const a = Math.min(loc.from, loc.to);
+      const a = segOf(loc.from, loc.to);
       rec.segment = a;
       rec.x = stationX(loc.from) + (stationX(loc.to) - stationX(loc.from)) * loc.f;
-      if (data.blocked && odd && a === seg) { rec.wrong = true; rec.y = Y_EVEN; }
+      const c = closureAt(data, a, tMin);
+      if (c && c.track === t.direction && c.track !== 'both' && c.train !== t.number) { rec.wrong = true; rec.y = odd ? Y_EVEN : Y_ODD; }
+    } else if (!Number.isInteger(loc.idx)) {
+      // остановка на перегоне (поломка): стоит на своём главном пути
+      rec.mid = true; rec.stopped = true; rec.segment = segOf(loc.idx, loc.idx);
+      rec.x = stationX(loc.idx);
+      rec.reason = t.broken ? `неисправность: ${t.broken.label.split(': ')[1] ?? t.broken.label}` : 'остановка на перегоне';
+      rec.waitedMin = Math.max(0, Math.round(tMin - loc.since));
+      rec.restMin = t.disabled ? null : Math.max(0, Math.round(loc.until - tMin));
     } else {
-      // стоит на боковом пути станции (ожидание) или прибыл на конечную
+      // на станции: боковой путь (ожидание, ТО) или конечная
       const key = `${loc.idx}:${odd}`;
       const n = slots.get(key) || 0;
       slots.set(key, n + 1);
       const cx = stationX(loc.idx);
-      const yard = loc.kind === 'arrived' && (loc.idx === 0 || loc.idx === data.stations.length - 1);
-      rec.x = yard ? cx + (loc.idx === 0 ? -64 : 64) : cx + [-2, 62, -66, 126][n % 4] * (odd ? -1 : 1);
-      rec.y = yard ? (odd ? Y_ODD - 14 * (n + 1) : Y_EVEN + 14 * (n + 1)) : (odd ? Y_ODD - 24 - 20 * (Math.floor(n / 4) % 2) : Y_EVEN + 24 + 20 * (Math.floor(n / 4) % 2));
-      rec.stopped = loc.kind === 'wait';
-      if (rec.stopped) {
-        const side = odd ? loc.idx - 1 : loc.idx;      // перегон, который ждут
-        const blocker = data.blocked ? blockerOf(data, tMin, seg, t.number) : null;
-        const toSeg = data.blocked && (odd ? loc.idx - 1 : loc.idx) === seg;
+      const yard = (loc.kind === 'arrived' || loc.kind === 'service') && (loc.idx === 0 || loc.idx === last);
+      rec.x = yard ? cx + (loc.idx === 0 ? -64 : 64) : cx + [0, 66, -66, 132][n % 4] * (odd ? -1 : 1);
+      rec.y = yard ? (odd ? Y_ODD - 16 * (n + 1) : Y_EVEN + 16 * (n + 1)) : (odd ? Y_ODD - 26 - 22 * (Math.floor(n / 4) % 2) : Y_EVEN + 26 + 22 * (Math.floor(n / 4) % 2));
+      if (loc.kind === 'service') {
+        rec.service = true;
+        rec.reason = `техническое обслуживание: ${t.service.reason}`;
+        rec.waitedMin = Math.max(0, Math.round(tMin - loc.since));
+        rec.restMin = Math.max(0, Math.round(loc.until - tMin));
+      } else if (loc.kind === 'wait') {
         const held = data.holds.find(h => h.train === t.number && h.station === loc.idx);
+        const ahead = odd ? loc.idx - 1 : loc.idx;                 // перегон, который ждут
+        const c = closureAt(data, ahead, tMin);
         rec.held = Boolean(held);
-        rec.reason = held ? `задержан диспетчером на ${held.minutes} мин` : toSeg
-          ? `ждёт очереди на закрытый перегон ${data.stations[seg].id}–${data.stations[seg + 1].id}${blocker ? `: сейчас идёт №${blocker.number}` : ''}`
-          : 'ждёт на станции';
+        rec.planned = !held && !c && !broken && t.route.some((p, k) => k && p[1] === loc.idx && t.route[k - 1][1] === loc.idx);
+        rec.stopped = !rec.planned;
+        const blocker = c ? blockerOf(data, tMin, ahead, t.number) : null;
+        rec.reason = held ? `задержан диспетчером на ${held.minutes} мин`
+          : broken ? `неисправность: ${t.broken.label.split(': ')[1] ?? t.broken.label}`
+          : c ? (c.track === 'both'
+            ? `перегон ${data.stations[ahead].id}–${data.stations[ahead + 1].id} закрыт полностью${c.until != null ? `, до ${clockAt(data, c.until)}` : ''}`
+            : `ждёт очереди на закрытый перегон ${data.stations[ahead].id}–${data.stations[ahead + 1].id}${blocker ? `: сейчас идёт №${blocker.number}` : ''}`)
+          : rec.planned ? 'плановая стоянка: работа на станции' : 'ждёт на станции';
         rec.waitedMin = Math.max(0, Math.round(tMin - loc.since));
         rec.restMin = Math.max(0, Math.round(loc.until - tMin));
       }
@@ -85,7 +109,7 @@ export function placeTrains(data, tMin) {
       if (k < 0) { k = lanes.length; lanes.push(-Infinity); }
       lanes[k] = rec.x;
       rec.lane = Math.min(k, 3);
-      rec.y += (line === Y_ODD ? -1 : 1) * rec.lane * 24;
+      rec.y += (line === Y_ODD ? -1 : 1) * rec.lane * 26;
     }
   }
   return out;
@@ -93,13 +117,17 @@ export function placeTrains(data, tMin) {
 
 function trainStatus(data, rec, tMin) {
   const { t, loc } = rec;
-  const name = i => data.stations[i].name;
+  const name = i => data.stations[Math.round(i)]?.name ?? '';
+  if (rec.service) return `На техническом обслуживании на «${name(loc.idx)}» ещё ${rec.restMin} мин (${t.service.reason}). Отправление в ${clockAt(data, t.forecast[0][0])}.`;
+  if (rec.mid) return `Остановился на перегоне ${data.stations[rec.segment].id}–${data.stations[rec.segment + 1].id} (${rec.reason}). ${t.disabled ? 'Снят с рейса, ждёт резервный локомотив' : `Продолжит движение через ${rec.restMin} мин`}.`;
   if (loc.kind === 'move') {
-    const lim = data.restrictions.find(r => r.segment === rec.segment);
-    const nextEta = clockAt(data, loc.t1);
-    return `В пути: ${name(loc.from)} → ${name(loc.to)}, пройдено ${Math.round(loc.f * 100)}%${rec.wrong ? ' · по неправильному пути' : ''}${lim ? ` · ограничение ${lim.kmh} км/ч` : ''}. Прибытие на «${name(loc.to)}» в ${nextEta}.`;
+    const lim = data.restrictions.find(r => r.segment === rec.segment && (r.from == null || tMin >= r.from) && (r.until == null || tMin < r.until));
+    const cap = t.broken?.level === 1 && tMin >= t.broken.from ? ' · скорость ограничена из-за неисправности' : '';
+    return `В пути: ${name(loc.from)} → ${name(loc.to)}, пройдено ${Math.round(loc.f * 100)}%${rec.wrong ? ' · по неправильному пути' : ''}${lim ? ` · ограничение ${lim.kmh} км/ч` : ''}${cap}. Прибытие на «${name(loc.to)}» в ${clockAt(data, loc.t1)}.`;
   }
-  if (loc.kind === 'wait') return `Стоит на станции «${name(loc.idx)}» ${rec.waitedMin} мин, ${rec.reason}. Отправление через ${rec.restMin} мин.`;
+  if (loc.kind === 'wait') return rec.planned
+    ? `Плановая стоянка на «${name(loc.idx)}» ещё ${rec.restMin} мин: ${rec.reason}.`
+    : `Стоит на станции «${name(loc.idx)}» ${rec.waitedMin} мин, ${rec.reason}. Отправление через ${rec.restMin} мин.`;
   return `Прибыл на станцию «${name(loc.idx)}».`;
 }
 
@@ -137,7 +165,7 @@ function Station({ s, i, last, tracks, selected, ready, enRoute, onPick, lights 
       <rect x=${cx - 15} y="40" width="30" height="30" rx="6" class="m-bld"/>
       <text x=${cx} y="62" text-anchor="middle" class="m-bld-l">${s.id}</text>
     </g>
-    ${!yard && html`<line x1=${x0} x2=${x0} y1="92" y2=${Y_EVEN + 56} class="m-bound"/><line x1=${x1} x2=${x1} y1="92" y2=${Y_EVEN + 56} class="m-bound"/>`}
+    ${!yard && html`<line x1=${x0} x2=${x0} y1="92" y2=${Y_EVEN + 60} class="m-bound"/><line x1=${x1} x2=${x1} y1="92" y2=${Y_EVEN + 60} class="m-bound"/>`}
     ${yard
       ? html`<g class="m-yard">${[-2, -1, 0, 1, 2].map(k => html`<path key=${k} d=${`M${cx} ${k < 0 ? Y_ODD : Y_EVEN} L${cx + dir * 30} ${(Y_ODD + Y_EVEN) / 2 + k * 24} H${cx + dir * 110}`} class="m-rail thin"/>`)}</g>`
       : html`<g class="m-loop">
@@ -160,31 +188,51 @@ function Station({ s, i, last, tracks, selected, ready, enRoute, onPick, lights 
   </g>`;
 }
 
+/** Миникарта всего участка: поезда точками, окно просмотра, клик — переход. */
+function MiniMap({ data, live, W, scale, view, onJump, tMin }) {
+  const n = data.stations.length;
+  const w = 1000, h = 46, sx = x => (x / W) * w;
+  return html`<svg class="minimap" viewBox=${`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label="Миникарта участка: нажмите, чтобы перейти к месту"
+    onClick=${e => { const r = e.currentTarget.getBoundingClientRect(); onJump(((e.clientX - r.left) / r.width) * W); }}>
+    <line x1=${sx(stationX(0))} x2=${sx(stationX(n - 1))} y1="23" y2="23" class="mm-line"/>
+    ${data.stations.map((s, i) => html`<g key=${s.id}><line x1=${sx(stationX(i))} x2=${sx(stationX(i))} y1="14" y2="32" class="mm-st"/><text x=${sx(stationX(i))} y="10" text-anchor="middle" class="mm-t">${s.id}</text></g>`)}
+    ${data.dispatch.closures.map(c => html`<rect key=${c.id} x=${sx(stationX(c.segment))} y="18" width=${sx(STEP)} height="10" rx="3" class=${`mm-closed ${tMin < c.from ? 'planned' : ''}`}/>`)}
+    ${live.map(r => html`<circle key=${r.t.number} cx=${sx(r.x)} cy=${r.odd ? 17 : 29} r=${r.stopped || r.broken ? 4.5 : 3.2} fill=${FILL[r.t.priority]} class=${`mm-train ${r.stopped ? 'stopped' : ''}`}/>`)}
+    <rect x=${sx(view.left / scale)} y="3" width=${Math.max(10, sx(view.width / scale))} height=${h - 6} rx="4" class="mm-view"/>
+  </svg>`;
+}
+
 export function TrackMap({ data }) {
   const now = useLiveNow(clock.running ? 30 : 4);
   const tMin = (now - data.baseTime) / 60000;
   const wrap = useRef(null);
-  const [fit, setFit] = useState(true);
+  const [zoom, setZoomState] = useState(() => localStorage.getItem('mapZoom') || '1');
+  const setZoom = v => { localStorage.setItem('mapZoom', v); setZoomState(v); };
   const [boxW, setBoxW] = useState(1200);
+  const [view, setView] = useState({ left: 0, width: 1200 });
   const [hover, setHover] = useState(null);
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setBoxW(Math.round(e.contentRect.width)));
+    const ro = new ResizeObserver(([e]) => { setBoxW(Math.round(e.contentRect.width)); setView(v => ({ ...v, width: el.clientWidth })); });
     ro.observe(el);
-    return () => ro.disconnect();
+    const onScroll = () => setView({ left: el.scrollLeft, width: el.clientWidth });
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener('scroll', onScroll); };
   }, []);
   const n = data.stations.length;
   const W = MARGIN * 2 + (n - 1) * STEP;
-  const width = fit ? Math.max(boxW, 760) : W;
-  const scale = width / W;
+  const fit = zoom === 'fit';
+  const scale = fit ? Math.max(boxW, 760) / W : Number(zoom);
+  const width = W * scale;
   const selected = app.ui.selectedTrain;
   const live = placeTrains(data, tMin);     // точные положения для кадра
-  const seg = data.dispatch.closedSegment;
+  const closures = data.dispatch.closures;
+  const activeNow = closures.filter(c => tMin >= c.from);
 
   // занятость блок-участков (по три на перегон, счёт с запада) → проходные и станционные светофоры
   const occupied = blockOccupancy(live);
-  const occ = (line, sgm, b) => (line === 'o' && data.blocked && sgm === seg) || occupied.has(`${line}:${sgm}:${b}`);
+  const occ = (line, sgm, b) => activeNow.some(c => c.segment === sgm && (c.track === 'both' || (c.track === 'odd') === (line === 'o')) && (c.track !== (line === 'o' ? 'even' : 'odd'))) || occupied.has(`${line}:${sgm}:${b}`);
   const signals = [];
   for (let sgm = 0; sgm < n - 1; sgm++) {
     const xs = stationX(sgm) + HALF, L = STEP - 2 * HALF;
@@ -198,9 +246,12 @@ export function TrackMap({ data }) {
     oEntry: i < n - 1 && occ('o', i, 2), oExit: i > 0 && occ('o', i - 1, 0),
   });
   const stopped = live.filter(r => r.stopped);
-  const onLine = live.length;
+  const serviced = live.filter(r => r.service);
+  const broken = live.filter(r => r.broken);
+  const onLine = live.filter(r => !r.service).length;
   const sel = selected ? live.find(r => r.t.number === selected) : null;
   const selTrain = selected ? data.trains.find(t => t.number === selected) : null;
+  const ahead = clock.now - Date.now() > 120_000;
 
   // следим за выбранным поездом
   useEffect(() => {
@@ -208,48 +259,67 @@ export function TrackMap({ data }) {
     const target = sel.x * scale - wrap.current.clientWidth / 2;
     wrap.current.scrollLeft += (target - wrap.current.scrollLeft) * 0.15;
   });
+  // при первом показе без выбора прокручиваем к самой «горячей» точке: стоящим и сломавшимся поездам
+  const focused = useRef(false);
+  useEffect(() => {
+    if (focused.current || !wrap.current || fit || !live.length) return;
+    focused.current = true;
+    const hot = live.find(r => r.stopped || r.broken) || live[0];
+    wrap.current.scrollLeft = Math.max(0, hot.x * scale - wrap.current.clientWidth / 2);
+  }, [live.length > 0]);
 
   const enter = (e, rec) => { const r = wrap.current.getBoundingClientRect(); setHover({ n: rec.t.number, x: e.clientX - r.left + wrap.current.scrollLeft, y: e.clientY - r.top }); };
   const toggleRun = () => act({ type: 'clock', running: !clock.running });
-  const label = clock.running ? 'Пауза' : data.ended ? 'Смена окончена' : 'Пуск';
   const hovered = hover && live.find(r => r.t.number === hover.n);
+  const jump = x => { if (wrap.current) wrap.current.scrollTo({ left: Math.max(0, x * scale - wrap.current.clientWidth / 2), behavior: 'smooth' }); };
+  const trackLines = c => (c.track === 'both' ? [Y_ODD, Y_EVEN] : [c.track === 'odd' ? Y_ODD : Y_EVEN]);
 
   return html`<div class="trackmap">
     <div class="map-toolbar">
-      <div class="map-clock" aria-live="off"><${Icon} name="clock" size=${20} /><strong class="num">${time(now)}</strong></div>
-      <${Button} variant=${clock.running ? 'secondary' : 'primary'} icon=${clock.running ? 'pause' : 'play'} onClick=${toggleRun} disabled=${data.ended} reason="Смена закончена: начните её заново (кнопка сброса вверху)">${label}</${Button}>
+      <div class="map-clock" aria-live="off"><${Icon} name="clock" size=${20} /><div><strong class="num">${time(now)}</strong><small>${dateLong(now)}</small></div></div>
+      <${Button} variant=${clock.running ? 'secondary' : 'primary'} icon=${clock.running ? 'pause' : 'play'} onClick=${toggleRun}>${clock.running ? 'Пауза' : 'Пуск'}</${Button}>
       <div class="speed" role="group" aria-label="Скорость времени">
-        <span class="muted">Скорость, мин/с</span>
         <${Segmented} label="Скорость времени" value=${data.speed} options=${SPEEDS} onChange=${v => act({ type: 'clock', speed: v })} />
+        ${data.synced && data.speed === 1 ? html`<${Badge} tone="accent" icon="radio">реальное время</${Badge}>`
+          : html`<${Button} size="sm" icon="locate-fixed" disabled=${ahead} reason="Модельное время опережает реальное: вернуться можно только сбросом модели" onClick=${() => act({ type: 'clock', sync: true })}>К реальному</${Button}>`}
       </div>
       <div class="map-stats" role="status" aria-live="polite">
         <span><strong>${onLine}</strong> на линии</span>
         <span class=${stopped.length ? 'bad' : ''}><strong>${stopped.length}</strong> стоят</span>
+        <span><strong>${serviced.length}</strong> на ТО</span>
+        ${broken.length > 0 && html`<span class="bad"><strong>${broken.length}</strong> с поломкой</span>`}
       </div>
-      <div class="map-tools">
-        <${Button} variant="ghost" size="sm" icon=${fit ? 'zoom-in' : 'zoom-out'} onClick=${() => setFit(!fit)}>${fit ? 'Крупнее' : 'Вписать'}</${Button}>
-      </div>
+      <div class="map-tools"><${Segmented} label="Масштаб схемы" value=${zoom} options=${ZOOMS} onChange=${setZoom} /></div>
     </div>
+    <${MiniMap} data=${data} live=${live} W=${W} scale=${scale} view=${view} tMin=${tMin} onJump=${jump} />
     <div class="map-scroll" ref=${wrap} onPointerLeave=${() => setHover(null)}>
       <svg width=${width} height=${H * scale} viewBox=${`0 0 ${W} ${H}`} role="group"
-        aria-label=${`Схема участка: ${onLine} поездов на линии, ${stopped.length} стоят`}>
+        aria-label=${`Схема участка: ${onLine} поездов на линии, ${stopped.length} стоят, ${serviced.length} на техобслуживании`}>
         <defs><pattern id="mhatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="var(--danger-line)" stroke-width="3"/></pattern></defs>
         <line x1=${stationX(0)} x2=${stationX(n - 1)} y1=${Y_ODD} y2=${Y_ODD} class="m-rail m-odd"/>
         <line x1=${stationX(0)} x2=${stationX(n - 1)} y1=${Y_EVEN} y2=${Y_EVEN} class="m-rail m-even"/>
-        ${data.stations.slice(0, -1).map((a, k) => { const xa = stationX(k) + HALF, xb = stationX(k + 1) - HALF, xm = (xa + xb) / 2; return html`<g key=${k} class="m-section">
+        ${data.stations.slice(0, -1).map((a, k) => { const xa = stationX(k) + HALF, xb = stationX(k + 1) - HALF, xm = (xa + xb) / 2; const load = data.sections[k]; return html`<g key=${k} class="m-section">
           <path d=${`M${xa} 98 H${xb} M${xa + 5} 94 L${xa} 98 L${xa + 5} 102 M${xb - 5} 94 L${xb} 98 L${xb - 5} 102`} class="m-bracket"/>
-          <text x=${xm} y="92" text-anchor="middle" class="m-sect-t">${a.id}–${data.stations[k + 1].id}</text>
+          <text x=${xm} y="90" text-anchor="middle" class="m-sect-t">${a.id}–${data.stations[k + 1].id}</text>
+          <g><title>${`Загрузка перегона: ${load.trains} поездов в ближайший час, ${load.load}% пропускной способности`}</title>
+            <rect x=${xa} y="108" width=${xb - xa} height="7" rx="3.5" class="m-load-bg"/>
+            <rect x=${xa} y="108" width=${(xb - xa) * load.load / 100} height="7" rx="3.5" class=${`m-load-bar ${load.load >= 70 ? 'hot' : ''}`}/>
+            <text x=${xm} y="128" text-anchor="middle" class="m-load-t">${load.load}%</text></g>
           ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f + 4} ${Y_ODD - 5} L${xa + (xb - xa) * f - 4} ${Y_ODD} L${xa + (xb - xa) * f + 4} ${Y_ODD + 5}`} class="m-chev odd"/>`)}
           ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f - 4} ${Y_EVEN - 5} L${xa + (xb - xa) * f + 4} ${Y_EVEN} L${xa + (xb - xa) * f - 4} ${Y_EVEN + 5}`} class="m-chev even"/>`)}</g>`; })}
         ${data.stations.map((s, i) => html`<${Station} key=${s.id} s=${s} i=${i} last=${n - 1} tracks=${s.tracks} lights=${lightsOf(i)} selected=${app.ui.selectedStation === s.id}
           ready=${stationTraffic(data, s.id, now).waiting}
           enRoute=${stationTraffic(data, s.id, now).enRoute}
           onPick=${() => updateUi({ selectedStation: app.ui.selectedStation === s.id ? null : s.id })} />`)}
-        ${data.blocked && html`<g class="m-closed">
-          <rect x=${stationX(seg) + HALF} y=${Y_ODD - 12} width=${STEP - 2 * HALF} height="24" rx="4" fill="url(#mhatch)" class="m-hatch"/>
-          <g transform=${`translate(${stationX(seg) + STEP / 2} ${Y_ODD})`}><circle r="16" class="m-star"/><path d="M-7 -7 L7 7 M7 -7 L-7 7" class="m-x"/></g>
-          <text x=${stationX(seg) + STEP / 2} y=${(Y_ODD + Y_EVEN) / 2 + 5} text-anchor="middle" class="m-closed-t">сход: путь закрыт</text></g>`}
-        ${data.restrictions.map(r => html`<g key=${r.segment} transform=${`translate(${stationX(r.segment) + STEP / 2} ${Y_EVEN + 38})`}>
+        ${closures.map(c => {
+          const x0 = stationX(c.segment) + HALF, w = STEP - 2 * HALF, xm = x0 + w / 2, planned = tMin < c.from;
+          const first = trackLines(c)[0];
+          return html`<g key=${c.id} class=${`m-closed ${planned ? 'planned' : ''}`}>
+            ${trackLines(c).map(y => html`<rect key=${y} x=${x0} y=${y - 12} width=${w} height="24" rx="4" fill="url(#mhatch)" class="m-hatch"/>`)}
+            <g transform=${`translate(${xm} ${first})`}><circle r="16" class="m-star"/><path d="M-7 -7 L7 7 M7 -7 L-7 7" class="m-x"/></g>
+            <text x=${xm} y=${(Y_ODD + Y_EVEN) / 2 + 5} text-anchor="middle" class="m-closed-t">${planned ? `окно с ${clockAt(data, c.from)}` : c.kind === 'breakdown' ? 'поломка поезда' : 'путь закрыт'}</text></g>`;
+        })}
+        ${data.restrictions.filter(r => (r.from == null || tMin >= r.from) && (r.until == null || tMin < r.until)).map(r => html`<g key=${r.segment} transform=${`translate(${stationX(r.segment) + STEP / 2} ${Y_EVEN + 42})`}>
           <circle r="16" class="m-sign"/><text y="5" text-anchor="middle" class="m-sign-t">${r.kmh}</text></g>`)}
         ${signals.map(s => html`<circle key=${s.k} cx=${s.x} cy=${s.y} r="5" class=${`m-sig ${s.red ? 'red' : ''}`}/>`)}
         ${live.map(rec => {
@@ -257,26 +327,32 @@ export function TrackMap({ data }) {
           const isSel = selected === t.number;
           const dim = selected && !isSel;
           const goingLeft = rec.odd;      // нечётные всегда едут влево, даже по неправильному пути
-          return html`<g key=${t.number} class=${`mtrain p${t.priority} ${rec.stopped ? 'stopped' : ''} ${rec.wrong ? 'wrong' : ''} ${isSel ? 'sel' : ''}`} opacity=${dim ? 0.3 : 1}
+          return html`<g key=${t.number} class=${`mtrain p${t.priority} ${rec.stopped ? 'stopped' : ''} ${rec.planned ? 'planned' : ''} ${rec.service ? 'service' : ''} ${rec.broken ? 'broken' : ''} ${rec.wrong ? 'wrong' : ''} ${isSel ? 'sel' : ''}`} opacity=${dim ? 0.3 : 1}
             transform=${`translate(${rec.x.toFixed(1)} ${rec.y})`} tabindex="0" role="button"
             aria-label=${`Поезд ${t.number}, ${t.label}. ${trainStatus(data, rec, tMin)}`} aria-pressed=${isSel}
             onClick=${() => updateUi({ selectedTrain: isSel ? null : t.number })}
             onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); updateUi({ selectedTrain: isSel ? null : t.number }); } }}
             onPointerMove=${e => enter(e, rec)} onPointerEnter=${e => enter(e, rec)}>
-            <rect x="-38" y="-16" width="76" height="32" fill="transparent" class="m-hit"/>
-            ${rec.stopped && html`<circle r="28" class="m-pulse"/>`}
+            <rect x="-40" y="-17" width="80" height="34" fill="transparent" class="m-hit"/>
+            ${rec.stopped && html`<circle r="30" class="m-pulse"/>`}
             <rect x=${-TRAIN_W / 2} y=${-TRAIN_H / 2} width=${TRAIN_W} height=${TRAIN_H} rx="6" fill=${FILL[t.priority]} class="m-body"/>
-            <path d=${goingLeft ? `M${-TRAIN_W / 2} -10 L${-TRAIN_W / 2 - 11} 0 L${-TRAIN_W / 2} 10 Z` : `M${TRAIN_W / 2} -10 L${TRAIN_W / 2 + 11} 0 L${TRAIN_W / 2} 10 Z`} fill=${FILL[t.priority]}/>
+            <path d=${goingLeft ? `M${-TRAIN_W / 2} -11 L${-TRAIN_W / 2 - 12} 0 L${-TRAIN_W / 2} 11 Z` : `M${TRAIN_W / 2} -11 L${TRAIN_W / 2 + 12} 0 L${TRAIN_W / 2} 11 Z`} fill=${FILL[t.priority]}/>
             <text y="5" text-anchor="middle" class="m-num">${t.number}</text>
-            ${rec.stopped && html`<text y=${rec.odd ? -18 : 32} text-anchor="middle" class="m-stop">стоит ${rec.waitedMin} мин</text>`}
+            ${rec.broken && html`<g transform=${`translate(${TRAIN_W / 2 - 4} ${-TRAIN_H / 2 - 6})`}><circle r="8" class="m-warn"/><path d="M0 -4 V1 M0 4 V4.5" class="m-warn-mark"/></g>`}
+            ${rec.service && html`<g transform=${`translate(${TRAIN_W / 2 - 4} ${-TRAIN_H / 2 - 6})`}><circle r="8" class="m-wrench"/><path d="M-3 3 L1 -1 M0 -4 a3 3 0 0 1 4 4 l-1 1 -3 -3z" class="m-warn-mark"/></g>`}
+            ${rec.stopped && html`<text y=${rec.odd ? -20 : 34} text-anchor="middle" class="m-stop">${rec.mid ? 'неисправность' : `стоит ${rec.waitedMin} мин`}</text>`}
+            ${rec.service && html`<text y=${rec.odd ? -20 : 34} text-anchor="middle" class="m-svc">ТО ещё ${rec.restMin} мин</text>`}
+            ${rec.planned && html`<text y=${rec.odd ? -20 : 34} text-anchor="middle" class="m-plan">стоянка ${rec.restMin} мин</text>`}
           </g>`;
         })}
       </svg>
-      ${hovered && html`<div class="tip" style=${`left:${Math.min(hover.x + 14, width - 260)}px;top:${Math.min(hover.y + 18, H * scale - 120)}px`} role="tooltip">
+      ${hovered && html`<div class="tip" style=${`left:${Math.min(hover.x + 14, width - 270)}px;top:${Math.min(hover.y + 18, H * scale - 150)}px`} role="tooltip">
         <strong>№${hovered.t.number} · ${hovered.t.label}</strong>
         <span>${DIRECTION[hovered.t.direction]} направление · приоритет ${hovered.t.priority}</span>
-        <span class=${hovered.stopped ? 'bad' : ''}>${hovered.stopped ? `Стоит на «${data.stations[hovered.loc.idx].name}»` : hovered.loc.kind === 'move' ? `${data.stations[hovered.loc.from].name} → ${data.stations[hovered.loc.to].name}` : 'Прибыл'}</span>
-        <span class=${hovered.t.delay > 0 ? 'bad' : ''}>Прибытие ${clockAt(data, hovered.t.forecast.at(-1)[0])} · ${delayText(hovered.t.delay)}</span>
+        <span>${hovered.t.loco.series} ${hovered.t.loco.type} · ${hovered.t.wagons} ваг. · ${hovered.t.grossT} т</span>
+        <span>Загрузка ${hovered.t.loadPct}% · ТО: ${hovered.t.techState.status}</span>
+        <span class=${hovered.stopped ? 'bad' : ''}>${trainStatus(data, hovered, tMin).split('.')[0]}</span>
+        <span class=${hovered.t.delay > 0 ? 'bad' : ''}>${hovered.t.disabled ? 'Снят с рейса' : `Прибытие ${clockAt(data, hovered.t.forecast.at(-1)[0])} · ${delayText(hovered.t.delay)}`}</span>
       </div>`}
     </div>
     <div class="map-legend" aria-label="Условные обозначения">
@@ -287,32 +363,22 @@ export function TrackMap({ data }) {
       <span><svg width="12" height="20" aria-hidden="true"><rect x="1" y="1" width="10" height="18" rx="5" fill="#26333c"/><circle cx="6" cy="6" r="3" fill="#2d3c47"/><circle cx="6" cy="14" r="3" fill="#3fb37f"/></svg>Светофор: входной / выходной</span>
       <span><i class="lg-sig"></i>Блок-сигнал: свободен</span><span><i class="lg-sig red"></i>занят / закрыт</span>
       <span><svg width="8" height="18" aria-hidden="true"><line x1="4" y1="0" x2="4" y2="18" stroke="#8798a4" stroke-dasharray="3 3"/></svg>Граница станции</span>
+      <span><i class="lg-load"></i>Загрузка перегона (поездов в ближайший час)</span>
       <span class="lg-sep"></span>
       ${[1, 2, 3].map(p => html`<span key=${p}><i class="lg-train" style=${`background:${FILL[p]}`}></i>${PRIORITY[p].short}</span>`)}
       <span><i class="lg-train stopped"></i>Стоит и ждёт</span>
+      <span><i class="lg-train planned"></i>Плановая стоянка</span>
+      <span><i class="lg-badge svc"></i>На техобслуживании</span>
+      <span><i class="lg-badge warn"></i>Поломка</span>
     </div>
     <div class="map-info" role="region" aria-label="Выбранный поезд" aria-live="polite">
       ${selTrain ? (sel ? html`<div class="info-main"><strong>№${selTrain.number}</strong><${Badge} tone=${PRIORITY[selTrain.priority].tone}>${selTrain.label}</${Badge}>
           <span>${trainStatus(data, sel, tMin)}</span></div>
-        <div class="info-side"><${Badge} tone=${selTrain.delay > 0 ? 'danger' : 'neutral'}>${delayText(selTrain.delay)}</${Badge}>
+        <div class="info-side"><${Badge} tone=${selTrain.delay > 0 || selTrain.disabled ? 'danger' : 'neutral'}>${selTrain.disabled ? 'снят с рейса' : delayText(selTrain.delay)}</${Badge}>
           <${Button} variant="ghost" size="sm" icon="x" onClick=${() => updateUi({ selectedTrain: null })}>Снять</${Button}></div>`
-        : html`<div class="info-main"><strong>№${selTrain.number}</strong><span>${tMin < selTrain.forecast[0][0] ? `Ещё не вышел: отправление в ${clockAt(data, selTrain.forecast[0][0])} со станции «${data.stations[selTrain.forecast[0][1]].name}».` : 'Уже прибыл и ушёл с линии.'}</span></div>
+        : html`<div class="info-main"><strong>№${selTrain.number}</strong><span>${tMin < selTrain.forecast[0][0] ? `Ещё не вышел: отправление в ${clockAt(data, selTrain.forecast[0][0])} со станции «${data.stations[Math.round(selTrain.forecast[0][1])].name}».` : 'Уже прибыл и ушёл с линии.'}</span></div>
           <div class="info-side"><${Button} variant="ghost" size="sm" icon="x" onClick=${() => updateUi({ selectedTrain: null })}>Снять</${Button}></div>`)
         : html`<div class="info-main muted"><${Icon} name="mouse-pointer-click" size=${17} /><span>Нажмите на поезд, чтобы увидеть, где он и почему стоит. Нажмите на станцию — в панели диспетчера откроются её пути и вагоны.</span></div>`}
     </div>
   </div>`;
-}
-
-/** Список стоящих поездов с причинами. */
-export function StoppedList({ data }) {
-  const now = useLiveNow(1);
-  const tMin = (now - data.baseTime) / 60000;
-  const stopped = placeTrains(data, tMin).filter(r => r.stopped).sort((a, b) => b.waitedMin - a.waitedMin);
-  return html`<section class="panel" aria-labelledby="stop-title">
-    <div class="panel-head"><h2 id="stop-title">Стоят и ждут</h2><${Badge} tone=${stopped.length ? 'danger' : 'neutral'}>${stopped.length}</${Badge}></div>
-    ${stopped.length ? html`<ul class="late-list">${stopped.map(r => html`<li key=${r.t.number}>
-      <button type="button" class="late-row stop-row" aria-pressed=${app.ui.selectedTrain === r.t.number} onClick=${() => updateUi({ selectedTrain: app.ui.selectedTrain === r.t.number ? null : r.t.number })}>
-        <strong>№${r.t.number}</strong><span>${data.stations[r.loc.idx].name}: ${r.reason}</span><span class="bad num">${r.waitedMin} мин</span></button></li>`)}</ul>`
-      : html`<p class="muted">Сейчас все поезда на линии движутся. Если закрыть перегон, часть поездов будет ждать очереди.</p>`}
-  </section>`;
 }

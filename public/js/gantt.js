@@ -37,16 +37,16 @@ export function Gantt({ data, compact = false, zoom: forcedZoom, start: forcedSt
   const span = ui.zoom * 60;
   const lastMin = Math.max(...data.trains.map(t => t.forecast.at(-1)[0]));
   const maxStart = Math.max(0, Math.ceil(lastMin / 30) * 30 - span);
-  const start = Math.min(maxStart, Math.max(0, ui.windowStart ?? Math.round((nowMin - span * 0.12) / 15) * 15));
+  const minStart = Math.max(0, Math.floor((nowMin - 360) / 30) * 30);
+  const start = Math.min(maxStart, Math.max(minStart, ui.windowStart ?? Math.round((nowMin - span * 0.12) / 15) * 15));
   const end = start + span;
   const plotW = width - LEFT - RIGHT;
   const x = m => LEFT + ((m - start) / span) * plotW;
   const y = i => TOP + i * ROW + ROW / 2;
   const height = TOP + data.stations.length * ROW + 10;
-  const seg = data.dispatch.closedSegment;
-  const closed = data.blocked;
+  const closures = data.dispatch.closures;
   const selected = ui.selectedTrain;
-  const trains = useMemo(() => data.trains.filter(t => ui.category === 'all' || t.category === ui.category), [data.trains, ui.category]);
+  const trains = useMemo(() => data.trains.filter(t => (ui.category === 'all' || t.category === ui.category) && t.forecast[0][0] <= end && t.forecast.at(-1)[0] >= start), [data.trains, ui.category, start, end]);
 
   const ticks = [];
   for (let m = Math.ceil(start / 30) * 30; m <= end; m += 30) ticks.push(m);
@@ -60,7 +60,7 @@ export function Gantt({ data, compact = false, zoom: forcedZoom, start: forcedSt
     const r = wrap.current.getBoundingClientRect();
     setHover(h => h && { ...h, x: e.clientX - r.left, y: e.clientY - r.top });
   };
-  const shift = dir => updateUi({ windowStart: Math.min(maxStart, Math.max(0, start + dir * span / 2)) });
+  const shift = dir => updateUi({ windowStart: Math.min(maxStart, Math.max(minStart, start + dir * span / 2)) });
   const hoverTrain = hover && data.trains.find(t => t.number === hover.n);
   const tipLeft = hover ? Math.min(hover.x + 14, width - 250) : 0;
 
@@ -68,7 +68,7 @@ export function Gantt({ data, compact = false, zoom: forcedZoom, start: forcedSt
     ${!compact && html`<div class="gantt-controls">
       <${Segmented} label="Масштаб времени" value=${ui.zoom} options=${ZOOMS} onChange=${v => updateUi({ zoom: v })} />
       <div class="btn-group" role="group" aria-label="Сдвиг окна времени">
-        <${Button} variant="secondary" size="sm" icon="chevron-left" label="Раньше" onClick=${() => shift(-1)} disabled=${start <= 0} reason="Это начало смены" />
+        <${Button} variant="secondary" size="sm" icon="chevron-left" label="Раньше" onClick=${() => shift(-1)} disabled=${start <= minStart} reason="Раньше данных нет: прошедшие поезда не хранятся" />
         <${Button} variant="secondary" size="sm" icon="chevron-right" label="Позже" onClick=${() => shift(1)} disabled=${start >= maxStart} reason="Больше поездов в графике нет" />
         <${Button} variant="secondary" size="sm" icon="locate-fixed" onClick=${() => updateUi({ windowStart: null })}>Сейчас</${Button}>
       </div>
@@ -101,12 +101,17 @@ export function Gantt({ data, compact = false, zoom: forcedZoom, start: forcedSt
           ${m % labelEvery === 0 && x(m) < width - RIGHT - 18 && html`<text x=${x(m)} y="20" text-anchor="middle" class="g-time">${clockAt(data, m)}</text>`}
         </g>`)}
         <g clip-path="url(#plot)">
-          ${closed && html`<g>
-            <rect x=${LEFT} y=${y(seg)} width=${plotW} height=${ROW} fill="var(--danger-bg)"/>
-            <rect x=${LEFT} y=${y(seg)} width=${plotW} height=${ROW} fill="url(#hatch)" opacity=".55"/>
-            <text x=${LEFT + plotW / 2} y=${y(seg) + ROW / 2 + 4} text-anchor="middle" class="g-closed">Перегон ${data.stations[seg].id}–${data.stations[seg + 1].id} · закрыт нечётный путь</text>
-          </g>`}
-          ${data.restrictions.map(r => html`<g key=${r.segment}>
+          ${closures.map(c => {
+            const x0 = Math.max(LEFT, x(c.from)), x1 = Math.min(LEFT + plotW, c.until == null ? LEFT + plotW : x(c.until));
+            if (x1 <= x0) return null;
+            const label = c.kind === 'breakdown' ? c.label : `${c.track === 'both' ? 'закрыты оба пути' : c.track === 'odd' ? 'закрыт нечётный путь' : 'закрыт чётный путь'}`;
+            return html`<g key=${c.id}>
+              <rect x=${x0} y=${y(c.segment)} width=${x1 - x0} height=${ROW} fill="var(--danger-bg)"/>
+              <rect x=${x0} y=${y(c.segment)} width=${x1 - x0} height=${ROW} fill="url(#hatch)" opacity=${c.from > nowMin ? .3 : .55}/>
+              ${x1 - x0 > 120 && html`<text x=${(x0 + x1) / 2} y=${y(c.segment) + ROW / 2 + 4} text-anchor="middle" class="g-closed">Перегон ${data.stations[c.segment].id}–${data.stations[c.segment + 1].id} · ${label}</text>`}
+            </g>`;
+          })}
+          ${data.restrictions.filter(r => (r.from == null || nowMin >= r.from) && (r.until == null || nowMin < r.until)).map(r => html`<g key=${r.segment}>
             <rect x=${LEFT + plotW - 96} y=${y(r.segment) + ROW / 2 - 11} width="90" height="22" rx="11" class="g-limit"/>
             <text x=${LEFT + plotW - 51} y=${y(r.segment) + ROW / 2 + 4} text-anchor="middle" class="g-limit-text">${r.kmh} км/ч</text>
           </g>`)}

@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 
 // Единый источник состояния клиента: серверный снимок + локальные настройки интерфейса.
 const listeners = new Set();
-export const clock = { now: 0, at: 0, running: false, speed: 3 };
+export const clock = { now: 0, at: 0, running: false, speed: 1, synced: false };
 /** Текущее модельное время, мс: между сообщениями сервера «идёт» плавно. */
-export const liveNow = () => (clock.running ? clock.now + ((performance.now() - clock.at) / 1000) * clock.speed * 60000 : clock.now);
-function setClock(c) { clock.now = c.now; clock.at = performance.now(); clock.running = c.running; clock.speed = c.speed; }
+export const liveNow = () => (clock.running ? clock.now + (performance.now() - clock.at) * clock.speed : clock.now);
+function setClock(c) { clock.now = c.now; clock.at = performance.now(); clock.running = c.running; clock.speed = c.speed; clock.synced = Boolean(c.synced); }
 
 /** Перерисовка компонента с частотой fps (для плавного движения и часов). */
 export function useLiveNow(fps = 1) {
@@ -86,7 +86,10 @@ export function connect() {
     const next = JSON.parse(e.data);
     setClock(next);
     const same = app.data && next.revision === app.data.revision && next.now === app.data.now;
+    const first = !app.data;
     update(same ? { online: true } : { data: next, online: true, failed: false });
+    // ссылка вида #/?train=153 выбирает поезд, как только пришли данные
+    if (first && app.route.params.train && next.trains.some(t => t.number === app.route.params.train)) updateUi({ selectedTrain: app.route.params.train });
   };
   source.addEventListener('clock', e => setClock(JSON.parse(e.data)));
   source.onerror = () => update({ online: false, failed: !app.data });

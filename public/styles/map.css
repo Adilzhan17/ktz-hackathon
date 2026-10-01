@@ -89,3 +89,34 @@
 .m-tl .on-red { fill: #e5534b; } .m-tl .on-green { fill: #3fb37f; } .m-tl .off { fill: #3a4954; }
 .lg-plat { display: inline-block; width: 26px; height: 8px; border-radius: 2px; background: #aebbc6; }
 .lg-sep { flex-basis: 100%; height: 0; }
+
+/* ===== Миникарта, загрузка перегонов, ТО и поломки ===== */
+.minimap { width: 100%; height: 46px; display: block; cursor: pointer; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.mm-line { stroke: #9fb0bb; stroke-width: 2; }
+.mm-st { stroke: #8798a4; stroke-width: 1.5; }
+.mm-t { font-size: 9px; fill: var(--text-3); font-weight: 600; }
+.mm-closed { fill: var(--danger); opacity: .55; }
+.mm-closed.planned { opacity: .25; }
+.mm-train { stroke: #fff; stroke-width: 1; }
+.mm-train.stopped { stroke: var(--danger); stroke-width: 2; }
+.mm-view { fill: rgb(0 169 216 / 12%); stroke: var(--accent); stroke-width: 1.5; pointer-events: none; }
+.m-load-bg { fill: #e1e9ee; }
+.m-load-bar { fill: var(--accent); opacity: .85; }
+.m-load-bar.hot { fill: var(--danger); }
+.m-load-t { font-size: 11px; fill: var(--text-3); font-variant-numeric: tabular-nums; }
+.m-closed.planned { opacity: .55; }
+.m-closed.planned .m-star { fill: #8798a4; }
+.m-warn { fill: var(--danger); stroke: #fff; stroke-width: 1.5; }
+.m-wrench { fill: #6b5bd2; stroke: #fff; stroke-width: 1.5; }
+.m-warn-mark { stroke: #fff; stroke-width: 1.8; stroke-linecap: round; fill: none; }
+.m-svc { font-size: 12px; font-weight: 700; fill: #6b5bd2; paint-order: stroke; stroke: #fff; stroke-width: 3.5px; }
+.m-plan { font-size: 12px; font-weight: 600; fill: var(--text-2); paint-order: stroke; stroke: #fff; stroke-width: 3.5px; }
+.mtrain.planned .m-body { stroke: #8798a4; stroke-dasharray: 3 3; stroke-width: 2; }
+.mtrain.service .m-body { stroke: #6b5bd2; stroke-width: 2.5; }
+.mtrain.broken .m-body { stroke: var(--danger); stroke-width: 3; }
+.lg-load { display: inline-block; width: 26px; height: 7px; border-radius: 4px; background: linear-gradient(90deg, var(--accent), var(--danger)); }
+.lg-train.planned { background: #fff; border: 2px dashed #8798a4; }
+.lg-badge { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
+.lg-badge.svc { background: #6b5bd2; } .lg-badge.warn { background: var(--danger); }
+.speed { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.map-clock small { display: block; color: var(--text-3); font-size: var(--text-xs); }

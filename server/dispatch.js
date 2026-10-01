@@ -1,17 +1,21 @@
-// Расчёт прогноза движения: закрытие перегона, ограничения скорости, варианты пропуска.
+// Расчёт прогноза движения: закрытия путей и перегонов, ограничения скорости, поломки поездов, варианты пропуска.
 // Чистые функции без побочных эффектов: на входе состояние, на выходе план.
 //
 // Модель намеренно простая и объяснимая:
-//  * у каждого поезда есть нормативная нитка — точки [минуты от начала смены, индекс станции];
+//  * у каждого поезда есть нормативная нитка — точки [минуты от начала суток модели, координата станции];
+//    координата — индекс станции, у остановки на перегоне дробная;
 //  * ограничение скорости растягивает время хода по перегону пропорционально 80 км/ч / ограничение;
-//  * при закрытии перегона один путь занят, и оба направления идут по оставшемуся, а на нём
-//    встречные поезда не могут находиться одновременно;
-//  * варианты пропуска — разные правила очерёдности занятия такого перегона.
+//  * закрытие пути на перегоне (сход, ремонт, поломка поезда): поезда закрытого направления идут по
+//    соседнему пути против обычного направления, и встречные не могут быть на нём одновременно;
+//    если закрыты оба пути, поезда ждут снятия закрытия;
+//  * варианты пропуска — разные правила очерёдности занятия такого перегона;
+//  * поломка поезда: 1 — ограничение скорости до конечной, 2 — стоянка и продолжение,
+//    3 и 4 — поезд снят с рейса.
 // Это не проверенный график и не замена СЦБ: интервальное регулирование и стрелочные маршруты не моделируются.
 
 export const NOMINAL_KMH = 80;
 export const WRONG_TRACK_FACTOR = 1.25; // ход по неправильному пути медленнее из-за стрелок
-export const CLOSED_SEGMENT = 3; // перегон D–E: между станциями с индексами 3 и 4
+export const CLOSED_SEGMENT = 3; // перегон D–E: закрытие по умолчанию (кнопка «Сход»)
 export const HEADWAY = 6; // минимальный интервал попутного следования, мин
 export const MARGIN = 3; // зазор между встречными поездами, мин
 export const MAX_HOLD = 45; // дольше этого поезд на станции не удерживают ради приоритетного, мин
@@ -25,6 +29,7 @@ const WEIGHT = { 1: 10, 2: 2, 3: 1 };
 /** Приоритет с учётом решения диспетчера «пропустить первым». */
 export const prioOf = (state, train) => state.overrides?.[train.number] ?? train.priority;
 export const directionOf = train => (train.route[0][1] < train.route.at(-1)[1] ? 'even' : 'odd');
+export const nowMinutes = state => (state.now - state.origin) / 60000;
 
 const VARIANTS = [
   {
@@ -41,46 +46,100 @@ const VARIANTS = [
   },
 ];
 
-function restrictionFor(state, segment) {
-  return (state.restrictions || []).find(r => r.segment === segment);
+/** Закрытия путей (ручные и от поломок), действующие сейчас или запланированные. */
+export function activeClosures(state) {
+  const t = nowMinutes(state);
+  return (state.incidents || []).filter(i => i.track && (i.until == null || i.until > t)).sort((a, b) => a.from - b.from);
 }
 
-// Нитка с учётом ограничений скорости и хода по неправильному пути (без очерёдности на закрытом перегоне).
+const closureAt = (state, segment, t, exceptTrain) =>
+  activeClosures(state).find(c => c.segment === segment && t >= c.from && (c.until == null || t < c.until) && c.train !== exceptTrain);
+
+const restrictionFor = (state, segment, t) =>
+  (state.restrictions || []).find(r => r.segment === segment && (r.from == null || t >= r.from) && (r.until == null || t < r.until));
+
+const breakdownOf = (state, train) => (state.incidents || []).find(i => i.kind === 'breakdown' && i.train === train.number);
+
+/** Координата поезда в момент t по нитке: {kind:'move'|'wait'|'before'|'after', ...}. */
+export function locateAt(points, t) {
+  if (t < points[0][0]) return { kind: 'before', idx: points[0][1], t0: points[0][0] };
+  if (t > points.at(-1)[0]) return { kind: 'after', idx: points.at(-1)[1] };
+  for (let k = 1; k < points.length; k++) {
+    if (t <= points[k][0]) {
+      const [t0, i0] = points[k - 1], [t1, i1] = points[k];
+      if (i0 === i1) return { kind: 'wait', idx: i0, since: t0, until: t1 };
+      return { kind: 'move', from: i0, to: i1, f: (t - t0) / (t1 - t0), pos: i0 + (i1 - i0) * ((t - t0) / (t1 - t0)) };
+    }
+  }
+  return { kind: 'after', idx: points.at(-1)[1] };
+}
+
+// Нитка с учётом ограничений скорости, хода по неправильному пути, задержек диспетчера и поломки.
 function naturalTimeline(state, train) {
-  const closed = state.blocked;
   const dir = directionOf(train);
+  const bd = breakdownOf(state, train);
   const points = [[train.route[0][0], train.route[0][1]]];
   let t = train.route[0][0];
-  // Задержка по решению диспетчера: поезд стоит на станции, дальше всё сдвигается.
   const hold = idx => (state.holds || []).find(h => h.train === train.number && h.station === idx);
   const dwell = idx => { const h = hold(idx); if (h) { t += h.minutes; points.push([t, idx]); } };
   dwell(train.route[0][1]);
   for (let k = 1; k < train.route.length; k++) {
-    const segment = Math.min(train.route[k - 1][1], train.route[k][1]);
+    const [tp, ip] = train.route[k - 1], [tn, inn] = train.route[k];
+    if (ip === inn) { // плановая стоянка (маневровая работа, ТО)
+      t += tn - tp; points.push([t, inn]); dwell(inn); continue;
+    }
+    const segment = Math.min(ip, inn);
     let factor = 1;
-    const restriction = restrictionFor(state, segment);
+    const restriction = restrictionFor(state, segment, t);
     if (restriction) factor *= NOMINAL_KMH / restriction.kmh;
-    if (closed && segment === CLOSED_SEGMENT && dir === 'odd') factor *= WRONG_TRACK_FACTOR;
-    t += Math.round((train.route[k][0] - train.route[k - 1][0]) * factor);
-    points.push([t, train.route[k][1]]);
-    dwell(train.route[k][1]);
+    const c = closureAt(state, segment, t, train.number);
+    if (c && c.track === dir && c.track !== 'both') factor *= WRONG_TRACK_FACTOR;
+    if (bd && bd.level === 1 && t >= bd.from) factor *= bd.capFactor;
+    t += Math.round((tn - tp) * factor);
+    points.push([t, inn]);
+    dwell(inn);
   }
-  return points;
+  return bd && bd.level >= 2 ? applyBreakdown(points, bd) : points;
 }
 
-function crossing(points) {
+// Остановка из-за поломки: поезд замирает в точке, где его застала поломка.
+function applyBreakdown(points, bd) {
+  const t0 = bd.from;
+  const here = locateAt(points, t0);
+  if (here.kind === 'before' || here.kind === 'after') return points;
+  const pos = here.kind === 'move' ? here.pos : here.idx;
+  let j = 0;
+  while (j + 1 < points.length && points[j + 1][0] <= t0) j += 1;
+  const head = points.slice(0, j + 1);
+  if (head.at(-1)[0] < t0 || head.at(-1)[1] !== pos) head.push([t0, pos]);
+  head.push([t0 + bd.duration, pos]);
+  if (bd.level >= 3) return head; // поезд снят с рейса
+  const tail = points.slice(j + 1).filter(([m]) => m > t0).map(([m, i]) => [m + bd.duration, i]);
+  return head.concat(tail);
+}
+
+/** Время, когда нитка впервые достигает координаты x. */
+function timeAt(points, x) {
   for (let k = 1; k < points.length; k++) {
-    if (Math.min(points[k - 1][1], points[k][1]) === CLOSED_SEGMENT && Math.max(points[k - 1][1], points[k][1]) === CLOSED_SEGMENT + 1) {
-      return { k, enter: points[k - 1][0], exit: points[k][0] };
-    }
+    const [t0, i0] = points[k - 1], [t1, i1] = points[k];
+    if ((i0 <= x && x <= i1) || (i1 <= x && x <= i0)) return i0 === i1 ? t0 : t0 + ((x - i0) / (i1 - i0)) * (t1 - t0);
+  }
+  return null;
+}
+
+/** Проход закрытого перегона: прямой ход станция → станция. */
+function hopOver(points, segment, dir) {
+  const a = dir === 'even' ? segment : segment + 1, b = dir === 'even' ? segment + 1 : segment;
+  for (let k = 1; k < points.length; k++) {
+    if (points[k - 1][1] === a && points[k][1] === b) return { k, enter: points[k - 1][0], exit: points[k][0] };
   }
   return null;
 }
 
 // Назначение времён входа на закрытый перегон по правилу очерёдности.
-function scheduleClosure(items, variantId) {
+function scheduleClosure(items, variantId, blockedUntil = -Infinity) {
   const pending = [...items];
-  const last = { even: { enter: -Infinity, exit: -Infinity }, odd: { enter: -Infinity, exit: -Infinity } };
+  const last = { even: { enter: -Infinity, exit: blockedUntil - MARGIN }, odd: { enter: -Infinity, exit: blockedUntil - MARGIN } };
   let lastEnter = -Infinity;
   let currentDir = null;
   const result = new Map();
@@ -130,59 +189,71 @@ function applyDelay(points, k, delay) {
 
 function evaluate(state, variantId) {
   const trains = state.trains;
-  const natural = new Map(trains.map(t => [t.number, naturalTimeline(state, t)]));
-  const delays = new Map();
-  const forecast = new Map();
-  let order = [];
-  if (state.blocked) {
+  const closures = activeClosures(state);
+  const forecast = new Map(trains.map(t => [t.number, naturalTimeline(state, t)]));
+  const order = [];
+  for (const closure of closures) {
     const items = [];
     for (const train of trains) {
-      const c = crossing(natural.get(train.number));
-      if (c) items.push({ train, dir: directionOf(train), priority: prioOf(state, train), enter: c.enter, duration: c.exit - c.enter, k: c.k });
+      if (train.number === closure.train) continue;
+      const bd = breakdownOf(state, train);
+      if (bd && bd.level >= 3) continue;
+      const dir = directionOf(train);
+      const hop = hopOver(forecast.get(train.number), closure.segment, dir);
+      if (!hop || hop.exit <= closure.from || (closure.until != null && hop.enter >= closure.until)) continue;
+      items.push({ train, dir, priority: prioOf(state, train), enter: hop.enter, duration: hop.exit - hop.enter, k: hop.k });
     }
-    const { result, order: o } = scheduleClosure(items, variantId);
-    order = o.map(number => {
+    const until = closure.track === 'both' ? (closure.until ?? closure.from + 24 * 60) : -Infinity;
+    const { result, order: o } = scheduleClosure(items, variantId, until);
+    for (const number of o) {
       const item = items.find(i => i.train.number === number);
-      return { train: number, label: item.train.label, priority: item.priority, dir: item.dir, enter: result.get(number), delay: result.get(number) - item.enter };
-    });
-    for (const item of items) forecast.set(item.train.number, applyDelay(natural.get(item.train.number), item.k, result.get(item.train.number) - item.enter));
+      order.push({ train: number, label: item.train.label, priority: item.priority, dir: item.dir, enter: result.get(number), delay: result.get(number) - item.enter, closure: closure.id });
+    }
+    for (const item of items) forecast.set(item.train.number, applyDelay(forecast.get(item.train.number), item.k, result.get(item.train.number) - item.enter));
   }
+  const delays = new Map();
   for (const train of trains) {
-    const points = forecast.get(train.number) || natural.get(train.number);
-    forecast.set(train.number, points);
-    delays.set(train.number, points.at(-1)[0] - train.route.at(-1)[0]);
+    const points = forecast.get(train.number);
+    const bd = breakdownOf(state, train);
+    delays.set(train.number, bd && bd.level >= 3 ? null : points.at(-1)[0] - train.route.at(-1)[0]);
   }
   return { forecast, delays, order };
 }
 
 function metrics(state, delays) {
-  let total = 0, weighted = 0, passenger = 0, max = 0, delayed = 0;
+  let total = 0, weighted = 0, passenger = 0, max = 0, delayed = 0, disabled = 0;
   for (const train of state.trains) {
     const d = delays.get(train.number);
+    if (d === null) { disabled += 1; continue; }
     if (d <= 0) continue;
     const pr = prioOf(state, train);
     delayed += 1; total += d; weighted += d * WEIGHT[pr];
     if (train.category === 'passenger') passenger += d;
     max = Math.max(max, d);
   }
-  return { total, weighted, passenger, max, delayedTrains: delayed };
+  return { total, weighted, passenger, max, delayedTrains: delayed, disabled };
 }
 
 // Встречные поезда, которые по нормативному графику одновременно оказываются на единственном свободном пути.
 function conflicts(state) {
-  if (!state.blocked) return [];
-  const items = [];
-  for (const train of state.trains) {
-    const c = crossing(naturalTimeline(state, train));
-    if (c) items.push({ train, dir: directionOf(train), ...c });
-  }
   const out = [];
-  for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
-    const a = items[i], b = items[j];
-    if (a.dir === b.dir) continue;
-    if (a.enter < b.exit + MARGIN && b.enter < a.exit + MARGIN) {
-      out.push({ a: { train: a.train.number, label: a.train.label, priority: prioOf(state, a.train), dir: a.dir, enter: a.enter, exit: a.exit },
-        b: { train: b.train.number, label: b.train.label, priority: prioOf(state, b.train), dir: b.dir, enter: b.enter, exit: b.exit } });
+  for (const closure of activeClosures(state)) {
+    if (closure.track === 'both') continue;
+    const items = [];
+    for (const train of state.trains) {
+      if (train.number === closure.train) continue;
+      const dir = directionOf(train);
+      const hop = hopOver(naturalTimeline(state, train), closure.segment, dir);
+      if (hop && hop.exit > closure.from && (closure.until == null || hop.enter < closure.until)) items.push({ train, dir, ...hop });
+    }
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (a.dir === b.dir) continue;
+      if (a.enter < b.exit + MARGIN && b.enter < a.exit + MARGIN) {
+        out.push({ closure: closure.id,
+          a: { train: a.train.number, label: a.train.label, priority: prioOf(state, a.train), dir: a.dir, enter: a.enter, exit: a.exit },
+          b: { train: b.train.number, label: b.train.label, priority: prioOf(state, b.train), dir: b.dir, enter: b.enter, exit: b.exit } });
+      }
     }
   }
   return out.sort((x, y) => Math.min(x.a.priority, x.b.priority) - Math.min(y.a.priority, y.b.priority) || x.a.enter - y.a.enter);
@@ -203,16 +274,18 @@ function explain(variants, recommendedId) {
 
 // Основной вход: полный план для текущего состояния.
 export function computePlan(state) {
+  const closures = activeClosures(state);
+  const hasClosure = closures.length > 0;
   const evaluated = VARIANTS.map(v => {
-    const e = evaluate(state, state.blocked ? v.id : 'fifo');
+    const e = evaluate(state, hasClosure ? v.id : 'fifo');
     return { ...v, ...e, metrics: metrics(state, e.delays) };
   });
-  const recommended = state.blocked
+  const recommended = hasClosure
     ? [...evaluated].sort((a, b) => a.metrics.weighted - b.metrics.weighted || a.metrics.passenger - b.metrics.passenger || (a.id === 'priority' ? -1 : 1))[0]
     : evaluated[2];
-  const selectedId = state.blocked ? (evaluated.some(v => v.id === state.variant) ? state.variant : recommended.id) : null;
-  const selected = state.blocked ? evaluated.find(v => v.id === selectedId) : evaluated[2];
-  const variants = state.blocked ? evaluated.map(v => ({
+  const selectedId = hasClosure ? (evaluated.some(v => v.id === state.variant) ? state.variant : recommended.id) : null;
+  const selected = hasClosure ? evaluated.find(v => v.id === selectedId) : evaluated[2];
+  const variants = hasClosure ? evaluated.map(v => ({
     id: v.id, name: v.name, description: v.description, recommended: v.id === recommended.id,
     metrics: v.metrics, order: v.order,
   })) : [];
@@ -221,19 +294,22 @@ export function computePlan(state) {
     byTrain[train.number] = { delay: selected.delays.get(train.number), forecast: selected.forecast.get(train.number) };
   }
   return {
-    active: Boolean(state.blocked || (state.restrictions || []).length),
-    variants, selectedId, recommendedId: state.blocked ? recommended.id : null,
-    why: state.blocked ? explain(variants, recommended.id) : null,
+    active: Boolean(hasClosure || (state.restrictions || []).length),
+    closures,
+    variants, selectedId, recommendedId: hasClosure ? recommended.id : null,
+    why: hasClosure ? explain(variants, recommended.id) : null,
     conflicts: conflicts(state), byTrain, metrics: selected.metrics, order: selected.order,
   };
 }
 
 const memo = new WeakMap();
 export function getPlan(state) {
-  const key = JSON.stringify([state.blocked, state.variant, state.restrictions, state.holds, state.overrides]);
+  const key = `${state.planRev}|${state.variant}`;
   const cached = memo.get(state);
   if (cached?.key === key) return cached.plan;
   const plan = computePlan(state);
   memo.set(state, { key, plan });
   return plan;
 }
+/** Вызывать при любом изменении исходных данных расчёта (поезда, закрытия, ограничения, задержки, приоритеты). */
+export function touchPlan(state) { state.planRev = (state.planRev || 0) + 1; }

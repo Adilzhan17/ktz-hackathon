@@ -1,24 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createState, snapshot, act } from '../server/model.js';
+import { createState, snapshot, act, advanceTime } from '../server/model.js';
 import { stationTraffic, blockOccupancy } from '../public/js/station-metrics.js';
 
 test('arrival counts keep reserved groups and change occupancy only on admission', () => {
-  const state = createState();
+  const state = createState({ auto: { stations: false, intensity: 'off' } });
+  advanceTime(state, 600);
   let data = snapshot(state);
-  assert.deepEqual(stationTraffic(data, 'D'), { waiting: 0, waitingWagons: 0, enRoute: 3, enRouteWagons: 30 });
-  data = act(state, { type: 'reserve', groupId: 'D-G1' });
-  assert.equal(stationTraffic(data, 'D').enRoute, 3);
-  data = act(state, { type: 'advance', minutes: 60 });
-  assert.equal(stationTraffic(data, 'D').waiting, 1);
-  assert.equal(data.stations.find(s => s.id === 'D').occupied, 10);
-  data = act(state, { type: 'arrive', groupId: 'D-G1' });
-  assert.equal(stationTraffic(data, 'D').waiting, 0);
-  assert.equal(data.stations.find(s => s.id === 'D').occupied, 20);
-  data = act(state, { type: 'complete', trackId: 'D-2' });
-  assert.equal(data.stations.find(s => s.id === 'D').occupied, 20);
-  data = act(state, { type: 'clear', trackId: 'D-2' });
-  assert.equal(data.stations.find(s => s.id === 'D').occupied, 14);
+  const g = data.groups.find(x => x.eligible && x.etaAt <= data.now);
+  assert.ok(g, 'есть прибывшая группа, которую можно принять');
+  const station = () => data.stations.find(s => s.id === g.stationId);
+  const before = stationTraffic(data, g.stationId);
+  const occupiedBefore = station().occupied;
+  assert.ok(before.waiting >= 1 && before.waitingWagons >= g.count);
+  data = act(state, { type: 'reserve', groupId: g.id });
+  assert.equal(stationTraffic(data, g.stationId).waiting, before.waiting);
+  assert.equal(station().occupied, occupiedBefore);
+  data = act(state, { type: 'arrive', groupId: g.id });
+  assert.equal(stationTraffic(data, g.stationId).waiting, before.waiting - 1);
+  assert.equal(station().occupied, occupiedBefore + g.count);
 });
 
 test('offset train labels do not move block occupancy to the opposite track', () => {

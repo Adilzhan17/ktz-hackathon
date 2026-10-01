@@ -2,12 +2,46 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { createState, snapshot, act, tick } from './model.js';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
+import { createState, snapshot, act, tick, advanceTime } from './model.js';
 
-// KTZ_AUTOPLAY=0 — время стоит на месте до команды (тесты); по умолчанию идёт, пока есть зрители.
+// KTZ_AUTOPLAY=0 — детерминированный режим для тестов: время стоит, события выключены, состояние не сохраняется.
+// Иначе модель живёт в реальном времени: расписание строится непрерывно, события случаются сами, состояние хранится на диске.
 const autoplay = process.env.KTZ_AUTOPLAY !== '0';
-const fresh = () => Object.assign(createState(), { running: autoplay });
-let state = fresh();
+const STATE_FILE = process.env.KTZ_STATE || fileURLToPath(new URL('../data/state.json', import.meta.url));
+const fresh = () => (autoplay
+  ? Object.assign(createState({ now: Math.floor(Date.now() / 1000) * 1000, auto: { stations: true, intensity: 'normal', approve: true } }), { running: true, synced: true, speed: 1 })
+  : createState());
+
+function load() {
+  if (!autoplay || !existsSync(STATE_FILE)) return fresh();
+  try {
+    const saved = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+    if (saved.version !== 2) return fresh();
+    saved.planRev = (saved.planRev || 0) + 1;
+    delete saved.version;
+    // Пока сервер не работал, жизнь шла: догоняем реальное время (не больше суток).
+    const gap = (Date.now() - saved.now) / 60_000;
+    if (gap > 0) {
+      advanceTime(saved, Math.min(gap, 24 * 60));
+      if (gap > 24 * 60) saved.now = Date.now();
+    }
+    saved.speed = 1; saved.synced = saved.now >= Date.now() - 120_000 ? saved.synced : false;
+    return saved;
+  } catch (error) {
+    console.error('Не удалось загрузить состояние, начинаем заново:', error.message);
+    return fresh();
+  }
+}
+function save() {
+  if (!autoplay) return;
+  try {
+    mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+    writeFileSync(`${STATE_FILE}.tmp`, JSON.stringify({ ...state, version: 2 }));
+    renameSync(`${STATE_FILE}.tmp`, STATE_FILE);
+  } catch (error) { console.error('Не удалось сохранить состояние:', error.message); }
+}
+let state = load();
 const clients = new Set();
 const publicRoot = new URL('../public/', import.meta.url);
 const port = Number(process.env.PORT || 3000);
@@ -23,15 +57,19 @@ function broadcast() {
   const message = `data: ${JSON.stringify(snapshot(state))}\n\n`;
   for (const res of clients) res.write(message);
 }
-const clock = () => `event: clock\ndata: ${JSON.stringify({ now: state.now, running: state.running, speed: state.speed })}\n\n`;
-// Ход времени: раз в секунду, только пока кто-то смотрит. Полный снимок — при изменении данных и раз в 5 секунд.
+const clock = () => `event: clock\ndata: ${JSON.stringify({ now: state.now, running: state.running, speed: state.speed, synced: state.synced })}\n\n`;
+// Ход времени: раз в секунду. Реальный ход (×1) идёт всегда; ускорение — только пока кто-то смотрит.
+// Полный снимок — при изменении данных и раз в 5 секунд, состояние на диск — раз в 20 секунд.
 let ticks = 0;
 const timer = setInterval(() => {
-  if (!clients.size || !state.running) return;
   ticks += 1;
-  const changed = tick(state, state.speed);
-  if (changed || ticks % 5 === 0) broadcast();
-  else for (const res of clients) res.write(clock());
+  if (state.speed > 1 && !clients.size) { state.speed = 1; state.synced = false; }
+  const changed = tick(state, 1, Date.now());
+  if (clients.size) {
+    if (changed || ticks % 5 === 0) broadcast();
+    else for (const res of clients) res.write(clock());
+  }
+  if (ticks % 20 === 0) save();
 }, 1000);
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
@@ -39,8 +77,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/state') return json(res, 200, snapshot(state));
     if (req.method === 'GET' && url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-      // Новый зритель после окончания смены начинает новую.
-      if (!clients.size && state.now >= snapshot(state).endAt) state = fresh();
       res.write(`data: ${JSON.stringify(snapshot(state))}\n\n`);
       clients.add(res); req.on('close', () => clients.delete(res)); return;
     }
@@ -52,7 +88,7 @@ const server = http.createServer(async (req, res) => {
         if (body.length > 8192) return json(res, 413, { error: 'Слишком большой запрос' });
       }
       const action = JSON.parse(body);
-      if (action?.type === 'reset') state = fresh();
+      if (action?.type === 'reset') { state = fresh(); save(); }
       else act(state, action);
       broadcast(); return json(res, 200, snapshot(state));
     }
@@ -60,7 +96,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET') return json(res, 405, { error: 'Метод не поддерживается' });
     if (url.pathname === '/healthz') return json(res, 200, { ok: true });
     // Движок расчёта открыт клиенту: страница «Как это работает» запускает его в песочнице.
-    if (url.pathname === '/engine/model.js' || url.pathname === '/engine/dispatch.js') {
+    if (['/engine/model.js', '/engine/dispatch.js', '/engine/world.js'].includes(url.pathname)) {
       const body = await readFile(fileURLToPath(new URL(`./${path.basename(url.pathname)}`, import.meta.url)));
       res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
       return res.end(body);
@@ -87,4 +123,4 @@ const server = http.createServer(async (req, res) => {
 const heartbeat = setInterval(() => { for (const res of clients) res.write(': heartbeat\n\n'); }, 1000);
 server.listen(port, host, () => console.log(`Автодиспетчер: http://${host}:${port}`));
 server.on('error', error => { console.error(error.message); clearInterval(heartbeat); clearInterval(timer); process.exit(1); });
-process.on('SIGTERM', () => { clearInterval(heartbeat); clearInterval(timer); for (const client of clients) client.end(); server.close(); });
+process.on('SIGTERM', () => { save(); clearInterval(heartbeat); clearInterval(timer); for (const client of clients) client.end(); server.close(); });

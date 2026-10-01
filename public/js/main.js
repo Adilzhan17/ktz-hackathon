@@ -52,7 +52,7 @@ function Topbar({ data, onReset, onSearch }) {
     <button class="global-search" type="button" onClick=${onSearch} aria-label="Поиск поездов и станций"><${Icon} name="search" size=${17} /><span>Поезд или станция</span><kbd>⌘ / Ctrl K</kbd></button>
     <div class="clock" aria-label="Время модели">
       <${Icon} name="clock" size=${18} />
-      <div><strong class="num">${time(liveMs)}</strong><small>${dateLong(liveMs)} · ${clock.running ? `идёт, ×${data.speed} мин/с` : 'на паузе'}</small></div>
+      <div><strong class="num">${time(liveMs)}</strong><small>${dateLong(liveMs)} · ${clock.running ? (clock.synced && data.speed === 1 ? 'реальное время' : `ускорено ×${data.speed}`) : 'на паузе'}</small></div>
     </div>
     <div class="btn-group" role="group" aria-label="Перемотать время вперёд">
       ${[[15, '+15 мин'], [30, '+30 мин'], [60, '+1 час']].map(([m, l]) => html`<${Button} key=${m} size="sm" variant="secondary" disabled=${dis} reason=${app.online ? 'Выполняется действие' : 'Нет соединения с сервером'} onClick=${() => step(m)}>${l}</${Button}>`)}

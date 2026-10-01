@@ -16,26 +16,35 @@ export function Overview({ data }) {
   const worst = passengerLate.reduce((m, t) => Math.max(m, t.delay), 0);
   const totalDelay = late.reduce((n, t) => n + t.delay, 0);
   const incident = data.blocked;
+  const avgLoad = Math.round(data.sections.reduce((n, x) => n + x.load, 0) / data.sections.length);
+  const busiest = data.sections.reduce((m, x) => (x.load > m.load ? x : m), data.sections[0]);
+  const serviced = data.trains.filter(t => t.techState.status === 'на ТО').length;
+  const soon = data.trains.filter(t => t.techState.status === 'скоро ТО').length;
+  const broken = data.trains.filter(t => t.broken).length;
   return html`<${PageHeader} title="Оперативная обстановка"
       subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
       actions=${html`<a class="btn btn-secondary" href=${href('/trains')}><${Icon} name="train-front" size=${17} />${data.trains.length} поездов</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
     <section class="panel map-panel" aria-labelledby="map-title">
       <div class="panel-head"><div><h2 id="map-title">Схема участка в реальном времени</h2>
-        <small>Сверху нечётный путь (←), снизу чётный (→). Кружки у путей — проходные светофоры автоблокировки.</small></div></div>
+        <small>Время идёт в реальном ходе; поезда, ТО, вагоны и происшествия создаются сами. Сверху нечётный путь (←), снизу чётный (→).</small></div></div>
       <${TrackMap} data=${data} />
     </section>
     <${DispatcherPanel} data=${data} />
     <section class="kpis" aria-label="Показатели участка">
       <${Kpi} label="Состояние участка" icon="activity" tone=${incident ? 'danger' : 'neutral'}
         value=${incident ? 'Инцидент' : data.restrictions.length ? 'Ограничения' : 'Норма'}
-        note=${incident ? 'Закрыт нечётный путь D–E' : data.restrictions.length ? count(data.restrictions.length, ['ограничение скорости', 'ограничения скорости', 'ограничений скорости']) : 'Движение по графику'} />
+        note=${incident ? count(data.dispatch.closures.length, ['закрытие пути', 'закрытия пути', 'закрытий пути']) : data.restrictions.length ? count(data.restrictions.length, ['ограничение скорости', 'ограничения скорости', 'ограничений скорости']) : 'Движение по графику'} />
       <${Kpi} label="Конфликты" icon="triangle-alert" tone=${data.dispatch.conflicts.length ? 'danger' : 'neutral'}
         value=${data.dispatch.conflicts.length} note=${data.dispatch.conflicts.length ? 'встречных поездов на одном пути' : 'встречных поездов нет'} />
+      <${Kpi} label="Загрузка участка" icon="gauge" tone=${avgLoad >= 70 ? 'danger' : 'neutral'} value=${avgLoad} unit="%"
+        note=${`самый загруженный перегон ${data.stations[busiest.segment].id}–${data.stations[busiest.segment + 1].id}: ${busiest.load}%`} />
       <${Kpi} label="Опоздание пассажирских" icon="train-front" tone=${worst ? 'danger' : 'neutral'}
         value=${worst ? `+${worst}` : '0'} unit="мин"
         note=${passengerLate.length ? `${count(passengerLate.length, ['поезд задерживается', 'поезда задерживаются', 'поездов задерживается'])} из ${data.trains.filter(t => t.category === 'passenger').length}` : 'все пассажирские по графику'} />
       <${Kpi} label="Задержано поездов" icon="hourglass" value=${late.length} unit=${`из ${data.trains.length}`}
         note=${late.length ? `суммарно ${duration(totalDelay)}` : 'задержек нет'} />
+      <${Kpi} label="ТО и поломки" icon="wrench" tone=${broken ? 'danger' : 'neutral'} value=${serviced} unit="на ТО"
+        note=${`${soon} скоро ТО · ${broken ? `${broken} с поломкой` : 'поломок нет'}`} />
     </section>
     <div class="grid-main">
       <section class="panel gid-panel" aria-labelledby="gid-title">
@@ -72,54 +81,59 @@ export function DecisionsPage({ data }) {
 }
 
 const SORTS = {
-  number: t => Number(t.number), priority: t => t.priority, dir: t => t.direction,
-  wagons: t => t.wagons, plan: t => t.route.at(-1)[0], forecast: t => t.forecast.at(-1)[0], delay: t => t.delay,
+  number: t => Number(t.number), priority: t => t.priority, load: t => t.loadPct, cond: t => t.techState.conditionPct,
+  plan: t => t.route.at(-1)[0], forecast: t => t.forecast.at(-1)[0], delay: t => (t.delay === null ? 1e9 : t.delay),
 };
+const FILTERS = [{ value: 'all', label: 'Все' }, { value: 'late', label: 'Опаздывают' }, { value: 'service', label: 'ТО' }, { value: 'broken', label: 'Поломки' }];
 
 export function Trains({ data }) {
   const [sort, setSort] = useState({ key: 'delay', dir: -1 });
   const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
   const { ui } = app;
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return data.trains
       .filter(t => (ui.category === 'all' || t.category === ui.category)
-        && (!q || `${t.number} ${t.label} ${stationName(data, t.route[0][1])} ${stationName(data, t.route.at(-1)[1])}`.toLowerCase().includes(q)))
+        && (filter === 'all' || (filter === 'late' && (t.delay > 0 || t.disabled)) || (filter === 'service' && ['на ТО', 'ТО перед рейсом', 'скоро ТО'].includes(t.techState.status)) || (filter === 'broken' && t.broken))
+        && (!q || `${t.number} ${t.label} ${t.loco.series} ${stationName(data, t.route[0][1])} ${stationName(data, t.route.at(-1)[1])}`.toLowerCase().includes(q)))
       .sort((a, b) => (SORTS[sort.key](a) > SORTS[sort.key](b) ? 1 : SORTS[sort.key](a) < SORTS[sort.key](b) ? -1 : 0) * sort.dir || Number(a.number) - Number(b.number));
-  }, [data, ui.category, query, sort]);
+  }, [data, ui.category, query, sort, filter]);
   const th = (key, label) => html`<th scope="col" aria-sort=${sort.key === key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
-    <button type="button" class="th-btn" onClick=${() => setSort(s => ({ key, dir: s.key === key ? -s.dir : (key === 'delay' ? -1 : 1) }))}>${label}
+    <button type="button" class="th-btn" onClick=${() => setSort(s => ({ key, dir: s.key === key ? -s.dir : (key === 'delay' || key === 'load' ? -1 : 1) }))}>${label}
       <${Icon} name=${sort.key === key ? (sort.dir > 0 ? 'chevron-up' : 'chevron-down') : 'arrow-up-down'} size=${13} /></button></th>`;
   const show = t => { updateUi({ selectedTrain: t.number }); go('/'); };
   const exportCsv = () => downloadCsv('trains.csv', [
-    ['Номер', 'Тип', 'Приоритет', 'Направление', 'Откуда', 'Куда', 'Вагонов', 'Прибытие по графику', 'Прогноз прибытия', 'Опоздание, мин'],
-    ...rows.map(t => [t.number, t.label, t.priority, DIRECTION[t.direction], stationName(data, t.route[0][1]), stationName(data, t.route.at(-1)[1]), t.wagons, clockAt(data, t.route.at(-1)[0]), clockAt(data, t.forecast.at(-1)[0]), t.delay])]);
-  return html`<${PageHeader} title="Поезда участка" subtitle=${`${data.trains.length} поездов в сценарии · приоритет определяет очерёдность при конфликтах`}
+    ['Номер', 'Тип', 'Приоритет', 'Направление', 'Откуда', 'Куда', 'Вагонов', 'Локомотив', 'Загрузка, %', 'Масса, т', 'Состояние ТО', 'Тех. состояние, %', 'Прибытие по графику', 'Прогноз прибытия', 'Опоздание, мин'],
+    ...rows.map(t => [t.number, t.label, t.priority, DIRECTION[t.direction], stationName(data, t.route[0][1]), stationName(data, t.route.at(-1)[1]), t.wagons, `${t.loco.series} №${t.loco.number}`, t.loadPct, t.grossT, t.techState.status, t.techState.conditionPct, clockAt(data, t.route.at(-1)[0]), clockAt(data, t.forecast.at(-1)[0]), t.delay ?? 'снят с рейса'])]);
+  return html`<${PageHeader} title="Поезда участка" subtitle=${`${data.trains.length} поездов в расписании на ближайшие сутки · приоритет определяет очерёдность при конфликтах`}
       actions=${html`<${Button} icon="download" onClick=${exportCsv}>Выгрузить CSV</${Button}>`} />
     <section class="panel">
       <div class="toolbar">
         <label class="search"><${Icon} name="search" size=${16} /><span class="sr-only">Поиск поезда</span>
-          <input type="search" placeholder="Номер, тип или станция" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
-        <${Segmented} label="Категория" value=${ui.category} onChange=${v => updateUi({ category: v })}
+          <input type="search" placeholder="Номер, тип, локомотив или станция" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
+        <div class="btn-row"><${Segmented} label="Категория" value=${ui.category} onChange=${v => updateUi({ category: v })}
           options=${[{ value: 'all', label: 'Все' }, { value: 'passenger', label: 'Пассажирские' }, { value: 'freight', label: 'Грузовые' }, { value: 'container', label: 'Контейнерные' }]} />
+          <${Segmented} label="Состояние" value=${filter} onChange=${setFilter} options=${FILTERS} /></div>
       </div>
       <p class="note"><${Icon} name="info" size=${15} /> Приоритет: ${Object.entries(data.priorityNames).map(([k, v]) => `${k} — ${v.toLowerCase()}`).join('; ')}.</p>
       <div class="table-wrap">
         <table class="table responsive">
-          <thead><tr>${th('number', '№')}${th('priority', 'Тип')}${th('dir', 'Направление')}<th scope="col">Маршрут</th>${th('wagons', 'Вагонов')}${th('plan', 'По графику')}${th('forecast', 'Прогноз')}${th('delay', 'Опоздание')}<th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
+          <thead><tr>${th('number', '№')}${th('priority', 'Тип')}<th scope="col">Маршрут</th><th scope="col">Локомотив</th>${th('load', 'Загрузка')}${th('cond', 'ТО / состояние')}${th('plan', 'По графику')}${th('forecast', 'Прогноз')}${th('delay', 'Опоздание')}<th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
           <tbody>
             ${rows.map(t => html`<tr key=${t.number} class=${app.ui.selectedTrain === t.number ? 'sel' : ''}>
               <td data-label="№"><strong>${t.number}</strong></td>
               <td data-label="Тип"><${Badge} tone=${PRIORITY[t.priority].tone}>${t.label}</${Badge}></td>
-              <td data-label="Направление">${DIRECTION[t.direction]}</td>
               <td data-label="Маршрут">${stationName(data, t.route[0][1])} <${Icon} name="arrow-right" size=${13} class="inline" /> ${stationName(data, t.route.at(-1)[1])}</td>
-              <td data-label="Вагонов" class="num">${t.wagons}</td>
+              <td data-label="Локомотив"><div class="two"><span>${t.loco.series}</span><small>${t.loco.type} · ${t.grossT} т</small></div></td>
+              <td data-label="Загрузка" class="num"><div class="two"><span>${t.loadPct}%</span><small>${t.wagons} ваг.${t.cargo ? ` · ${data.cargoNames[t.cargo].toLowerCase()}` : ''}</small></div></td>
+              <td data-label="ТО / состояние"><div class="two"><span class=${['скоро ТО'].includes(t.techState.status) ? 'bad' : ''}>${t.techState.status}</span><small>${t.techState.conditionPct}% · с ТО ${t.techState.hoursSince} ч</small></div></td>
               <td data-label="По графику" class="num">${clockAt(data, t.route.at(-1)[0])}</td>
-              <td data-label="Прогноз" class="num">${clockAt(data, t.forecast.at(-1)[0])}</td>
-              <td data-label="Опоздание" class=${`num ${t.delay > 0 ? 'bad' : ''}`}>${delayText(t.delay)}</td>
-              <td class="actions-cell"><${Button} size="sm" variant="ghost" icon="chart-gantt" onClick=${() => show(t)}>На ГИД</${Button}></td>
+              <td data-label="Прогноз" class="num">${t.disabled ? '—' : clockAt(data, t.forecast.at(-1)[0])}</td>
+              <td data-label="Опоздание" class=${`num ${t.delay > 0 || t.disabled ? 'bad' : ''}`}>${t.disabled ? 'снят с рейса' : delayText(t.delay)}</td>
+              <td class="actions-cell"><${Button} size="sm" variant="ghost" icon="chart-gantt" onClick=${() => show(t)}>На схеме</${Button}></td>
             </tr>`)}
-            ${!rows.length && html`<tr><td colspan="9"><${Empty} icon="search" title="Ничего не найдено">Измените поиск или категорию.</${Empty}></td></tr>`}
+            ${!rows.length && html`<tr><td colspan="10"><${Empty} icon="search" title="Ничего не найдено">Измените поиск, категорию или состояние.</${Empty}></td></tr>`}
           </tbody>
         </table>
       </div>
