@@ -75,6 +75,26 @@ export function ProblemDemo() {
   </div>`;
 }
 
+const MODEL_STEPS = [
+  ['radio-tower', 'Получаем факт', 'Сигнал, закрытие пути или ограничение скорости становятся событием с местом и временем.'],
+  ['chart-gantt', 'Сверяем график', 'Для каждого поезда строится прогнозная нитка: где он окажется и когда подойдёт к перегону.'],
+  ['triangle-alert', 'Ищем конфликт', 'Система отмечает поезда, которые хотят занять один путь одновременно.'],
+  ['calculator', 'Считаем варианты', 'По приоритету, пакетами или по очереди: для каждого варианта считаются задержки.'],
+  ['badge-check', 'Подтверждает человек', 'Только после выбора диспетчера меняется рабочий прогноз.'],
+  ['bell-ring', 'Обновляем всех', 'На ГИД появляются новые времена, а пассажиры получают уведомление.'],
+];
+
+export function ModelFlow() {
+  const pl = usePlayer(MODEL_STEPS.length, 4600);
+  const [, title, text] = MODEL_STEPS[pl.i];
+  return html`<div class="demo model-flow"><div class="model-diagram" role="img" aria-label=${`Цепочка работы модели, шаг ${pl.i + 1}: ${title}`}>
+    ${MODEL_STEPS.map(([icon, label], i) => html`<div key=${label} class=${`model-node ${i === pl.i ? 'on' : ''} ${i < pl.i ? 'done' : ''}`}><span class="model-icon"><${Icon} name=${i < pl.i ? 'check' : icon} size=${18} /></span><small>${i + 1}. ${label}</small></div>`)}
+    <i class="model-pulse" style=${`--step:${pl.i}`}></i></div>
+    <div class="demo-caption" aria-live="polite"><span class="step-no">${pl.i + 1} / ${MODEL_STEPS.length}</span><div><h3>${title}</h3><p>${text}</p></div></div>
+    <div class="model-rule"><${Icon} name="user-round-check" size=${17} /><span><strong>Важно:</strong> модель предлагает и объясняет; закрытие пути, выбор варианта и подтверждение остаются за диспетчером.</span></div>
+    <${PlayerControls} player=${pl} length=${MODEL_STEPS.length} labels=${MODEL_STEPS.map(x => x[1])} /></div>`;
+}
+
 // ---------------------------------------------------------------- факторы
 
 const FACTORS = [
