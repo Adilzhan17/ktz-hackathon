@@ -1,3 +1,4 @@
+import { stationTraffic, blockOccupancy } from './station-metrics.js';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, Icon, clockAt, time, delayText, duration, PRIORITY, DIRECTION } from './lib.js';
 import { app, act, go, href, updateUi, useLiveNow, liveNow, clock } from './store.js';
@@ -182,7 +183,7 @@ export function TrackMap({ data }) {
   const seg = data.dispatch.closedSegment;
 
   // занятость блок-участков (по три на перегон, счёт с запада) → проходные и станционные светофоры
-  const occupied = new Set(live.filter(r => r.loc.kind === 'move').map(r => `${r.y === Y_ODD ? 'o' : 'e'}:${r.segment}:${Math.min(2, Math.floor((r.odd ? 1 - r.loc.f : r.loc.f) * 2.999))}`));
+  const occupied = blockOccupancy(live);
   const occ = (line, sgm, b) => (line === 'o' && data.blocked && sgm === seg) || occupied.has(`${line}:${sgm}:${b}`);
   const signals = [];
   for (let sgm = 0; sgm < n - 1; sgm++) {
@@ -241,8 +242,8 @@ export function TrackMap({ data }) {
           ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f + 4} ${Y_ODD - 5} L${xa + (xb - xa) * f - 4} ${Y_ODD} L${xa + (xb - xa) * f + 4} ${Y_ODD + 5}`} class="m-chev odd"/>`)}
           ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f - 4} ${Y_EVEN - 5} L${xa + (xb - xa) * f + 4} ${Y_EVEN} L${xa + (xb - xa) * f - 4} ${Y_EVEN + 5}`} class="m-chev even"/>`)}</g>`; })}
         ${data.stations.map((s, i) => html`<${Station} key=${s.id} s=${s} i=${i} last=${n - 1} tracks=${s.tracks} lights=${lightsOf(i)} selected=${app.ui.selectedStation === s.id}
-          ready=${data.groups.filter(g => g.stationId === s.id && g.status === 'approaching' && g.etaAt <= now).length}
-          enRoute=${data.groups.filter(g => g.stationId === s.id && g.status === 'approaching' && g.etaAt > now).length}
+          ready=${stationTraffic(data, s.id, now).waiting}
+          enRoute=${stationTraffic(data, s.id, now).enRoute}
           onPick=${() => updateUi({ selectedStation: app.ui.selectedStation === s.id ? null : s.id })} />`)}
         ${data.blocked && html`<g class="m-closed">
           <rect x=${stationX(seg) + HALF} y=${Y_ODD - 12} width=${STEP - 2 * HALF} height="24" rx="4" fill="url(#mhatch)" class="m-hatch"/>

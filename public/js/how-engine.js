@@ -131,7 +131,7 @@ export function Sandbox() {
   const run = a => { try { engine.act(sb.state, a); setErr(''); } catch (e) { setErr(e.message); } setRev(r => r + 1); };
   const data = engine.snapshot(sb.state);
   const late = data.trains.filter(t => t.delay > 0);
-  const pax = data.trains.filter(t => t.priority === 1 && t.delay > 0);
+  const pax = data.trains.filter(t => t.category === 'passenger' && t.delay > 0);
   const d = data.dispatch;
   return html`<div class="demo sandbox">
     <div class="sandbox-bar">
@@ -178,7 +178,7 @@ export function Cases() {
   const r = useMemo(() => {
     if (!engine) return null;
     const blocked = snap(engine, [{ type: 'block' }]);
-    const pax = d => Math.max(0, ...d.trains.filter(t => t.priority === 1).map(t => t.delay));
+    const pax = d => Math.max(0, ...d.trains.filter(t => t.category === 'passenger').map(t => t.delay));
     const withSpeed = k => snap(engine, [{ type: 'restrict', segment: 5, kmh: k }]);
     const t153 = d => d.trains.find(t => t.number === '153');
     const byVar = id => snap(engine, [{ type: 'block' }, { type: 'variant', variantId: id }]);

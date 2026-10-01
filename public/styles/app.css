@@ -378,6 +378,11 @@ kbd { font:500 11px var(--font); padding:3px 6px; border:1px solid var(--line); 
 .station-card:hover { box-shadow:none; background:var(--surface-2); }
 .station-card .meter { margin:4px 0; }
 .station-card .sc-stats { border-top:1px solid var(--line); padding-top:14px; }
+.station-card .sc-stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.sc-occupancy { display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; }
+.sc-occupancy span, .sc-cargo { color:var(--text-3); font-size:12px; }
+.sc-cargo { display:flex; flex-wrap:wrap; gap:4px 12px; }
+.station-explainer { margin:0; max-width:100ch; }
 .foot { font-size:11px; line-height:1.7; }
 .foot span:last-child { max-width:70ch; }
 
