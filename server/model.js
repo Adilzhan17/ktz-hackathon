@@ -86,7 +86,7 @@ export function createState() {
     };
   });
   return {
-    now: BASE_TIME, revision: 0, stations, trains, groups, blocked: false, planApproved: false, variant: null, restrictions: [], notified: {}, notifications: [],
+    now: BASE_TIME, revision: 0, running: false, speed: 3, stations, trains, groups, blocked: false, planApproved: false, variant: null, restrictions: [], notified: {}, notifications: [],
     log: [{ at: BASE_TIME, text: 'Учебная смена: 10 станций, 30 поездов (6 пассажирских, 15 грузовых, 9 контейнерных). Число вагонов задано отдельно для каждого состава.' }],
   };
 }
@@ -137,7 +137,8 @@ export function snapshot(state) {
   const groups = state.groups.map(g => groupView(state, g, plan)).sort((a, b) => (a.slackMinutes ?? Infinity) - (b.slackMinutes ?? Infinity) || a.id.localeCompare(b.id));
   const trains = state.trains.map(t => ({ ...t, direction: directionOf(t), forecast: plan.byTrain[t.number].forecast, delay: plan.byTrain[t.number].delay }));
   const { byTrain, ...dispatch } = plan;
-  return { ...state, baseTime: BASE_TIME, trains, stations, groups, cargoNames, priorityNames: PRIORITY_NAMES,
+  const end = endAt(state);
+  return { ...state, endAt: end, ended: state.now >= end, baseTime: BASE_TIME, trains, stations, groups, cargoNames, priorityNames: PRIORITY_NAMES,
     dispatch: { ...dispatch, closedSegment: CLOSED_SEGMENT, selected: dispatch.selectedId, approved: state.planApproved } };
 }
 
@@ -167,16 +168,34 @@ function event(state, text) {
   state.log.unshift({ at: state.now, text });
   state.log = state.log.slice(0, 100);
 }
+function completeOperations(state) {
+  let changed = false;
+  for (const station of state.stations) for (const t of station.tracks) {
+    if (t.processing && t.finishAt <= state.now) { t.done += t.processing; t.processing = 0; changed = true; }
+  }
+  return changed;
+}
+export const SPEEDS = [1, 3, 10, 30];
+/** Время, когда заканчивается последний поезд смены (с учётом прогноза). */
+export function endAt(state) {
+  const plan = getPlan(state);
+  return BASE_TIME + (Math.max(...state.trains.map(t => plan.byTrain[t.number].forecast.at(-1)[0])) + 10) * minute;
+}
+/** Ход модельного времени: вызывается раз в секунду сервером, пока время «идёт». Возвращает true, если изменились данные. */
+export function tick(state, minutes) {
+  const end = endAt(state);
+  state.now = Math.min(end, state.now + minutes * minute);
+  const changed = completeOperations(state);
+  if (changed) state.revision += 1;
+  if (state.now >= end) { state.running = false; state.revision += 1; return true; }
+  return changed;
+}
 export function act(state, action) {
   assert(action && typeof action === 'object', 'Некорректное действие');
   if (action.type === 'advance') {
     assert([15, 30, 60].includes(action.minutes), 'Допустим шаг 15, 30 или 60 минут');
     state.now += action.minutes * minute;
-    for (const station of state.stations) for (const t of station.tracks) {
-      if (t.processing && t.finishAt <= state.now) {
-        t.done += t.processing; t.processing = 0;
-      }
-    }
+    completeOperations(state);
     event(state, `Время модели: +${action.minutes} мин. Завершённые операции учтены; вагоны ожидают уборки.`);
   } else if (action.type === 'complete' || action.type === 'clear') {
     const station = state.stations.find(s => s.tracks.some(t => t.id === action.trackId));
@@ -219,6 +238,14 @@ export function act(state, action) {
       t.processing += start; t.waiting += g.count - start; g.status = 'arrived';
       event(state, `${station.name}: принято ${g.count} ваг. группы №${g.train} на путь ${t.number}; ${start} подано на грузовой фронт.`);
     }
+  } else if (action.type === 'clock') {
+    if (action.speed !== undefined) { assert(SPEEDS.includes(action.speed), 'Скорость времени: 1, 3, 10 или 30 мин/с'); state.speed = action.speed; }
+    if (action.running !== undefined) {
+      assert(typeof action.running === 'boolean', 'Некорректное действие');
+      assert(!action.running || state.now < endAt(state), 'Смена закончена: начните её заново');
+      state.running = action.running;
+    }
+    state.revision += 1;
   } else if (action.type === 'block') {
     state.blocked = !state.blocked; state.planApproved = false; state.variant = null;
     const plan = getPlan(state);

@@ -3,20 +3,10 @@ import { html, Icon, count, delayText, clockAt, duration, PRIORITY, DIRECTION, d
 import { app, go, href, updateUi } from './store.js';
 import { Button, Badge, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { Gantt } from './gantt.js';
+import { TrackMap, StoppedList } from './trackmap.js';
 import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
 
 const stationName = (data, i) => data.stations[i].name;
-
-function Corridor({ data }) {
-  const closed = data.dispatch.closedSegment;
-  return html`<section class="corridor" aria-label="Схема участка">
-    <div class="corridor-header"><span><strong>${data.stations.length} станций</strong> · ${data.stations.at(-1).km} км</span><span>Нажмите на станцию, чтобы открыть грузовую работу</span></div>
-    <div class="corridor-scroll"><ol class="corridor-stops">${data.stations.map((s, i) => html`<li key=${s.id} class=${data.blocked && i === closed ? 'segment-closed' : ''}>
-      <a href=${href(`/station/${s.id}`)} aria-label=${`Открыть станцию ${s.name}`}><span class="stop-code">${s.id}</span><strong>${s.name}</strong><small>${s.km} км</small></a>
-      ${data.blocked && i === closed && html`<span class="segment-warning" title="Нечётный путь закрыт"><${Icon} name="triangle-alert" size=${14} /><span class="sr-only">Нечётный путь закрыт</span></span>`}
-    </li>`)}</ol></div>
-  </section>`;
-}
 
 export function Overview({ data }) {
   const late = data.trains.filter(t => t.delay > 0);
@@ -27,7 +17,11 @@ export function Overview({ data }) {
   return html`<${PageHeader} title="Оперативная обстановка"
       subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
       actions=${html`<a class="btn btn-secondary" href=${href('/trains')}><${Icon} name="train-front" size=${17} />${data.trains.length} поездов</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
-    <${Corridor} data=${data} />
+    <section class="panel map-panel" aria-labelledby="map-title">
+      <div class="panel-head"><div><h2 id="map-title">Схема участка в реальном времени</h2>
+        <small>Сверху нечётный путь (←), снизу чётный (→). Кружки у путей — проходные светофоры автоблокировки.</small></div></div>
+      <${TrackMap} data=${data} />
+    </section>
     <section class="kpis" aria-label="Показатели участка">
       <${Kpi} label="Состояние участка" icon="activity" tone=${incident ? 'danger' : 'neutral'}
         value=${incident ? 'Инцидент' : data.restrictions.length ? 'Ограничения' : 'Норма'}
@@ -48,6 +42,7 @@ export function Overview({ data }) {
       </section>
       <aside class="aside" aria-label="Что требует внимания">
         <${AttentionCard} data=${data} />
+        <${StoppedList} data=${data} />
         <${LateList} data=${data} />
       </aside>
     </div>`;

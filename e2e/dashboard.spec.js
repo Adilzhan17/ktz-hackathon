@@ -204,10 +204,10 @@ test('quick search navigates without changing the shared shift and restores focu
   expect((await (await request.get('/api/state')).json()).revision).toBe(before.revision);
 });
 
-test('corridor opens a station and mobile overflow menu preserves secondary routes', async ({ page }) => {
+test('live map opens a station and mobile overflow menu preserves secondary routes', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('.corridor-stops li')).toHaveCount(10);
-  await page.getByRole('link', { name: 'Открыть станцию Майтак' }).click();
+  await expect(page.locator('.m-station a')).toHaveCount(10);
+  await page.getByRole('link', { name: /^Станция Майтак,/ }).click();
   await expect(page.getByRole('heading', { name: 'Станция Майтак' })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('.mobile-more summary').click();
@@ -235,6 +235,47 @@ test('tablet and desktop layouts contain overflow within data regions', async ({
   }
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
-  await expect(page.locator('.corridor')).toBeVisible();
+  await expect(page.locator('.trackmap')).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('live map: trains are drawn, move with time, closure makes some stand and wait', async ({ page, request }) => {
+  await page.goto('/');
+  const map = page.locator('.trackmap');
+  await expect(map).toBeVisible();
+  await expect(map.locator('.mtrain').first()).toBeVisible();
+  const before = await map.locator('.mtrain').first().getAttribute('transform');
+  await request.post('/api/action', { data: { type: 'advance', minutes: 15 } });
+  await expect.poll(() => map.locator('.mtrain').first().getAttribute('transform')).not.toBe(before);
+  await expect(page.getByRole('heading', { name: 'Стоят и ждут' })).toBeVisible();
+  await request.post('/api/action', { data: { type: 'block' } });
+  await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
+  await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
+  await expect(map.locator('.m-closed')).toBeVisible();
+  await expect(map.locator('.mtrain.stopped').first()).toBeVisible();
+  await expect(page.locator('.stop-row').first()).toContainText('ждёт');
+  // выбор поезда: подробности под схемой
+  await map.locator('.mtrain').first().click();
+  await expect(page.locator('.map-info')).toContainText('№');
+});
+
+test('live map: play runs the model clock and pause stops it', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('radio', { name: '30' }).click();
+  await page.getByRole('button', { name: 'Пуск' }).click();
+  await expect(page.locator('.topbar .clock strong')).not.toHaveText('09:00', { timeout: 6000 });
+  await page.getByRole('button', { name: 'Пауза' }).click();
+  await expect(page.locator('.topbar .clock small')).toContainText('на паузе');
+  const t = await page.locator('.topbar .clock strong').innerText();
+  await page.waitForTimeout(1500);
+  expect(await page.locator('.topbar .clock strong').innerText()).toBe(t);
+});
+
+test('menu can be collapsed to give the map more room and the choice is remembered', async ({ page }) => {
+  await page.goto('/');
+  const w0 = (await page.locator('.nav').boundingBox()).width;
+  await page.getByRole('button', { name: 'Свернуть меню' }).click();
+  await expect.poll(async () => (await page.locator('.nav').boundingBox()).width).toBeLessThan(w0 / 2);
+  await page.reload();
+  expect((await page.locator('.nav').boundingBox()).width).toBeLessThan(w0 / 2);
 });

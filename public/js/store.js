@@ -2,6 +2,23 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 
 // Единый источник состояния клиента: серверный снимок + локальные настройки интерфейса.
 const listeners = new Set();
+export const clock = { now: 0, at: 0, running: false, speed: 3 };
+/** Текущее модельное время, мс: между сообщениями сервера «идёт» плавно. */
+export const liveNow = () => (clock.running ? clock.now + ((performance.now() - clock.at) / 1000) * clock.speed * 60000 : clock.now);
+function setClock(c) { clock.now = c.now; clock.at = performance.now(); clock.running = c.running; clock.speed = c.speed; }
+
+/** Перерисовка компонента с частотой fps (для плавного движения и часов). */
+export function useLiveNow(fps = 1) {
+  const [, set] = useState(0);
+  useEffect(() => {
+    let raf = 0, last = 0;
+    const loop = t => { if (t - last >= 1000 / fps) { last = t; set(n => n + 1); } raf = requestAnimationFrame(loop); };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [fps]);
+  return liveNow();
+}
+
 export const app = {
   data: null, online: false, failed: false, busy: false,
   route: { page: 'overview', params: {} },
@@ -67,9 +84,11 @@ export function connect() {
   source.onopen = () => update({ online: true, failed: false });
   source.onmessage = e => {
     const next = JSON.parse(e.data);
+    setClock(next);
     const same = app.data && next.revision === app.data.revision && next.now === app.data.now;
     update(same ? { online: true } : { data: next, online: true, failed: false });
   };
+  source.addEventListener('clock', e => setClock(JSON.parse(e.data)));
   source.onerror = () => update({ online: false, failed: !app.data });
 }
 
@@ -83,8 +102,9 @@ export async function act(payload) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Не удалось выполнить действие');
+    setClock(data);
     update({ data, busy: false });
-    toast(data.log[0].text);
+    if (payload.type !== 'clock') toast(data.log[0].text);
     return true;
   } catch (e) {
     update({ busy: false });

@@ -1,7 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, Icon, time, dateLong } from './lib.js';
-import { app, useApp, connect, act, href } from './store.js';
+import { app, useApp, connect, act, href, useLiveNow, clock } from './store.js';
 import { Button, Dialog, Toasts } from './ui.js';
 import { Overview, DecisionsPage, Trains, Stations } from './pages.js';
 import { HowPage } from './how.js';
@@ -19,7 +19,7 @@ const NAV = [
 ];
 const TITLES = { overview: 'Обстановка', decisions: 'Решения', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
-function Nav({ page, onAbout, attention }) {
+function Nav({ page, onAbout, attention, mini, onMini }) {
   const more = useRef(null);
   useEffect(() => { if (more.current) more.current.open = false; }, [page]);
   useEffect(() => {
@@ -33,26 +33,28 @@ function Nav({ page, onAbout, attention }) {
       <img src="/assets/ktz-emblem.png" alt="" width="40" height="40" />
       <span><strong>Автодиспетчер</strong><small>Поездной диспетчер · ГИД</small></span>
     </a>
-    <ul>${NAV.map(n => html`<li key=${n.page}><a href=${href(n.path)} class=${page === n.page || n.also?.includes(page) ? 'on' : ''}
+    <ul>${NAV.map(n => html`<li key=${n.page}><a href=${href(n.path)} title=${n.label} class=${page === n.page || n.also?.includes(page) ? 'on' : ''}
       aria-current=${page === n.page || n.also?.includes(page) ? 'page' : undefined}><${Icon} name=${n.icon} size=${19} /><span>${n.label}</span>${n.page === 'decisions' && attention > 0 && html`<b class="nav-badge" aria-label=${`Требует решения: ${attention}`}>${attention}</b>`}</a></li>`)}</ul>
     <details class="mobile-more" ref=${more}><summary><${Icon} name="menu" size=${19} /><span>Ещё</span></summary><div class="more-links"><a href=${href('/log')}><${Icon} name="list-checks" size=${18} />Журнал</a><a href=${href('/how')}><${Icon} name="book-open" size=${18} />Как это работает</a><button type="button" onClick=${() => { more.current.open = false; onAbout(); }}><${Icon} name="info" size=${18} />О системе</button></div></details>
     <div class="nav-foot">
       <img class="wordmark" src="/assets/ktz-wordmark.png" alt="Қазақстан темір жолы" />
-      <button type="button" class="nav-link" onClick=${onAbout}><${Icon} name="info" size=${18} /><span>О системе</span></button>
+      <button type="button" class="nav-link" onClick=${onAbout} title="О системе"><${Icon} name="info" size=${18} /><span>О системе</span></button>
+      <button type="button" class="nav-link nav-collapse" onClick=${onMini} aria-pressed=${mini} title=${mini ? 'Развернуть меню' : 'Свернуть меню'}><${Icon} name=${mini ? 'chevron-right' : 'chevron-left'} size=${18} /><span>Свернуть меню</span></button>
     </div>
   </nav>`;
 }
 
 function Topbar({ data, onReset, onSearch }) {
   const dis = !app.online || app.busy;
+  const liveMs = useLiveNow(1);
   const step = m => act({ type: 'advance', minutes: m });
   return html`<header class="topbar">
     <button class="global-search" type="button" onClick=${onSearch} aria-label="Поиск поездов и станций"><${Icon} name="search" size=${17} /><span>Поезд или станция</span><kbd>⌘ / Ctrl K</kbd></button>
     <div class="clock" aria-label="Время модели">
       <${Icon} name="clock" size=${18} />
-      <div><strong class="num">${time(data.now)}</strong><small>${dateLong(data.now)} · модельное время</small></div>
+      <div><strong class="num">${time(liveMs)}</strong><small>${dateLong(liveMs)} · ${clock.running ? `идёт, ×${data.speed} мин/с` : 'на паузе'}</small></div>
     </div>
-    <div class="btn-group" role="group" aria-label="Продвинуть время модели">
+    <div class="btn-group" role="group" aria-label="Перемотать время вперёд">
       ${[[15, '+15 мин'], [30, '+30 мин'], [60, '+1 час']].map(([m, l]) => html`<${Button} key=${m} size="sm" variant="secondary" disabled=${dis} reason=${app.online ? 'Выполняется действие' : 'Нет соединения с сервером'} onClick=${() => step(m)}>${l}</${Button}>`)}
     </div>
     <span class=${`conn ${app.online ? 'ok' : 'off'}`} role="status"><${Icon} name=${app.online ? 'wifi' : 'wifi-off'} size=${16} />${app.online ? 'На связи' : 'Нет связи'}</span>
@@ -69,6 +71,8 @@ function App() {
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
   }, []);
+  const [mini, setMini] = useState(() => localStorage.getItem('navMini') === '1');
+  const toggleMini = () => setMini(m => { localStorage.setItem('navMini', m ? '0' : '1'); return !m; });
   useEffect(() => { document.title = `${TITLES[route.page] || 'Автодиспетчер'} — Автодиспетчер КТЖ`; }, [route.page]);
   if (!data) {
     return html`<div class="boot" role="status">${app.failed ? html`<div class="boot-error"><h1>Не удалось подключиться к серверу</h1><p>Соединение восстановится автоматически. Если страница не оживает, перезапустите сервер.</p></div>` : 'Подключение к диспетчерской…'}</div>`;
@@ -82,8 +86,8 @@ function App() {
     station: html`<${StationPage} data=${data} params=${route.params} />`,
     log: html`<${LogPage} data=${data} />`,
   }[route.page];
-  return html`<div class="shell">
-    <${Nav} page=${route.page} onAbout=${() => setDialog('about')} attention=${data.blocked && !data.planApproved ? data.dispatch.conflicts.length : 0} />
+  return html`<div class=${`shell ${mini ? 'mini' : ''}`}>
+    <${Nav} mini=${mini} onMini=${toggleMini} page=${route.page} onAbout=${() => setDialog('about')} attention=${data.blocked && !data.planApproved ? data.dispatch.conflicts.length : 0} />
     <div class="workspace">
       <${Topbar} data=${data} onReset=${() => setDialog('reset')} onSearch=${() => setDialog('search')} />
       ${!app.online && html`<div class="offline" role="alert"><${Icon} name="wifi-off" size=${18} /> Нет соединения с сервером. Действия временно недоступны — подключаемся заново…</div>`}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { html, Icon, clockAt, time, delayText, PRIORITY, DIRECTION } from './lib.js';
-import { app, updateUi, go, href } from './store.js';
+import { app, updateUi, go, href, useLiveNow } from './store.js';
 import { Button, Segmented, Badge } from './ui.js';
 
 const LEFT = 148, TOP = 36, ROW = 40, RIGHT = 18;
@@ -32,6 +32,8 @@ export function Gantt({ data, compact = false, zoom: forcedZoom, start: forcedSt
   const [hover, setHover] = useState(null);
 
   const nowMin = (data.now - data.baseTime) / 60000;
+  const liveMs = useLiveNow(2);
+  const liveMin = (liveMs - data.baseTime) / 60000;
   const span = ui.zoom * 60;
   const lastMin = Math.max(...data.trains.map(t => t.forecast.at(-1)[0]));
   const maxStart = Math.max(0, Math.ceil(lastMin / 30) * 30 - span);
@@ -125,10 +127,10 @@ export function Gantt({ data, compact = false, zoom: forcedZoom, start: forcedSt
           })}
           ${sel && html`<text class="g-label" x=${x(sel.forecast[0][0]) + 8} y=${y(sel.forecast[0][1]) - 8}>№${sel.number}</text>`}
         </g>
-        ${nowMin >= start && nowMin <= end && html`<g>
-          <line x1=${x(nowMin)} x2=${x(nowMin)} y1=${TOP - 4} y2=${height - 6} class="g-now"/>
-          <rect x=${x(nowMin) - 25} y="4" width="50" height="20" rx="5" class="g-now-chip"/>
-          <text x=${x(nowMin)} y="18" text-anchor="middle" class="g-now-text">${time(data.now)}</text>
+        ${liveMin >= start && liveMin <= end && html`<g>
+          <line x1=${x(liveMin)} x2=${x(liveMin)} y1=${TOP - 4} y2=${height - 6} class="g-now"/>
+          <rect x=${x(liveMin) - 25} y="4" width="50" height="20" rx="5" class="g-now-chip"/>
+          <text x=${x(liveMin)} y="18" text-anchor="middle" class="g-now-text">${time(liveMs)}</text>
         </g>`}
       </svg>
       ${hoverTrain && html`<div class="tip" style=${`left:${tipLeft}px;top:${Math.min(hover.y + 16, height - 120)}px`} role="tooltip">
