@@ -62,6 +62,9 @@ test('timetable is continuous: three days pass with no gap, no duplicates and bo
   }
   assert.ok(seen.size > state.trains.length * 2, 'появлялись новые поезда');
   assert.ok(state.groups.length < 400, 'группы не копятся бесконечно');
+  const perTrain = new Map();
+  for (const g of state.groups) perTrain.set(g.uid, (perTrain.get(g.uid) || 0) + 1);
+  assert.ok([...perTrain.values()].every(n => n === 1), 'у каждого рейса ровно одна группа вагонов');
 });
 
 test('same start gives the same timetable (deterministic)', () => {
@@ -340,4 +343,27 @@ test('missing cargo specialization has no fabricated delivery slack', () => {
   assert.equal(g.slackMinutes, null);
   assert.equal(g.eligible, false);
   assert.equal(g.maxBatch, 0);
+});
+
+test('a train that has just arrived is not respawned and does not leave duplicate wagon groups', () => {
+  const state = quiet();
+  advanceTime(state, 4 * 24 * 60);
+  for (const tpl of new Set(state.trains.map(t => t.number))) {
+    assert.equal(state.groups.filter(g => g.train === tpl && g.status === 'approaching').length <= 2, true, `группы поезда ${tpl}`);
+  }
+  // сохранённое состояние с дублями чинится само
+  const bad = JSON.parse(JSON.stringify(state));
+  const g = bad.groups.find(x => x.status === 'approaching');
+  for (let i = 0; i < 50; i++) bad.groups.push({ ...g, id: `${g.id}-dup${i}` });
+  bad.planRev += 1;
+  advanceTime(bad, 1);
+  assert.equal(bad.groups.filter(x => x.uid === g.uid && x.status === 'approaching').length, 1);
+});
+
+test('autopilot does not fail when a heavy breakdown has outlived its closure', () => {
+  const state = createState({ auto: { stations: true, intensity: 'off', approve: true } });
+  const sn = snapshot(state);
+  const t = sn.trains.find(x => x.forecast[0][0] <= minutesNow(sn) && x.forecast.at(-1)[0] > minutesNow(sn) + 120 && !x.service);
+  act(state, { type: 'breakdown', train: t.number, level: 3, kind: 'loco' });
+  assert.doesNotThrow(() => advanceTime(state, 8 * 60));
 });

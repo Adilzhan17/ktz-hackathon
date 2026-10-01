@@ -170,17 +170,21 @@ export function ensureTrains(state) {
   const day = Math.floor(t / DAY);
   const have = new Set(state.trains.map(x => x.uid));
   let changed = false;
+  // Одна группа вагонов на рейс: защита от дублей (в том числе в старом сохранённом состоянии).
+  const uniq = new Set();
+  const groups = state.groups.filter(g => { if (g.status !== 'approaching') return true; if (uniq.has(g.uid)) return false; uniq.add(g.uid); return true; });
+  if (groups.length !== state.groups.length) state.groups = groups;
   for (let d = day - 1; d <= day + 1; d++) {
     for (const tpl of TEMPLATES) {
       const uid = `${tpl.id}@${d}`;
-      if (have.has(uid) || state.seen[uid]) continue;
+      if (have.has(uid) || uid in state.seen) continue;
       const dep = d * DAY + tpl.dep;
       if (dep > t + HORIZON || dep + 720 < t - 120) continue;
       if (state.trains.some(x => x.number === tpl.id && x.uid !== uid && x.route[0][0] > dep)) continue; // более новый уже есть
       // предыдущий поезд с этим номером должен быть снят
       for (const old of state.trains.filter(x => x.number === tpl.id)) removeTrain(state, old);
       const train = instantiate(state, tpl, d);
-      if (train.route.at(-1)[0] < t - 120) { state.seen[uid] = d; continue; } // уже давно прибыл
+      if (train.route.at(-1)[0] < t - 180) { state.seen[uid] = d; continue; } // уже давно прибыл
       state.trains.push(train);
       state.seen[uid] = d;
       if (train.cargo) state.groups.push(makeGroup(state, train));
@@ -404,7 +408,7 @@ export function autoEvents(state, dtMin) {
 
 /** Автопилот: если диспетчер не вмешался за 15 минут, применяется рекомендованный вариант. */
 export function autopilot(state, approve) {
-  if (!state.auto.approve || state.planApproved || !state.incidents.some(i => i.track)) return false;
+  if (!state.auto.approve || state.planApproved || !activeClosures(state).length) return false;
   if (state.awaitingSince == null || nowMinutes(state) - state.awaitingSince < 15) return false;
   approve(state, true);
   return true;

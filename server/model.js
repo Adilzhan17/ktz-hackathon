@@ -167,6 +167,7 @@ function approvePlan(state, auto) {
   state.planApproved = true;
   const plan = getPlan(state);
   const variant = plan.variants.find(v => v.id === plan.selectedId);
+  if (!variant) return;
   event(state, `${auto ? 'Автопилот применил рекомендованный' : 'Диспетчер подтвердил'} вариант «${variant.name}»: суммарная задержка ${variant.metrics.total} мин, пассажирских ${variant.metrics.passenger} мин.`);
   notifyPassengers(state);
 }

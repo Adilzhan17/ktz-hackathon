@@ -64,7 +64,8 @@ let ticks = 0;
 const timer = setInterval(() => {
   ticks += 1;
   if (state.speed > 1 && !clients.size) { state.speed = 1; state.synced = false; }
-  const changed = tick(state, 1, Date.now());
+  let changed = false;
+  try { changed = tick(state, 1, Date.now()); } catch (error) { console.error('Ошибка шага модели:', error); }
   if (clients.size) {
     if (changed || ticks % 5 === 0) broadcast();
     else for (const res of clients) res.write(clock());
