@@ -8,6 +8,17 @@ import { stationTraffic } from './station-metrics.js';
 import { CORRIDOR } from '/engine/rail-corridor.js';
 import { coordinateAt, indexOfLocation, prepareGeometry } from './geo-position.js';
 
+// A small railway silhouette: two cars and a cab at the leading end.
+// Rotate only the vehicle; the number remains upright at every track heading.
+const TRAIN_SVG = `<svg class="geo-train-vehicle" viewBox="0 0 76 24" aria-hidden="true" focusable="false">
+  <g class="geo-train-body" fill="currentColor" stroke="#fff" stroke-width="1.6" stroke-linejoin="round">
+    <path d="M2 5h19v12H2zM25 5h19v12H25zM48 5h12V2h7l7 8v7H48z"/>
+    <path d="M21 12h4m19 0h4" fill="none"/>
+  </g>
+  <path class="geo-train-windows" d="M6 8h4v4H6zm8 0h4v4h-4zm15 0h4v4h-4zm8 0h4v4h-4zm25-3h3l4 5h-7z" fill="#fff"/>
+  <path d="M49 13h21" stroke="#fff" stroke-width="1.5"/>
+  <g fill="#183444" stroke="#fff" stroke-width="1"><circle cx="7" cy="19" r="2.6"/><circle cx="17" cy="19" r="2.6"/><circle cx="30" cy="19" r="2.6"/><circle cx="40" cy="19" r="2.6"/><circle cx="54" cy="19" r="2.6"/><circle cx="68" cy="19" r="2.6"/></g>
+</svg>`;
 const GEOMETRY = prepareGeometry(CORRIDOR.segments);
 const SPEEDS = [{ value: 1, label: 'Реальное' }, { value: 60, label: '×60' }, { value: 180, label: '×180' }, { value: 600, label: '×600' }];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -74,7 +85,7 @@ export function GeographicMap({ data }) {
         const visible = new Set(records.map(r => r.t.number));
         for (const [number, entry] of trains) if (!visible.has(number)) { map.removeLayer(entry.marker); trains.delete(number); }
         for (const r of records) {
-          const number = r.t.number, point = coordinateAt(GEOMETRY, indexOfLocation(r.loc));
+          const number = r.t.number, index = indexOfLocation(r.loc), point = coordinateAt(GEOMETRY, index);
           const compact = map.getZoom() < 9 && number !== app.ui.selectedTrain;
           const state = `${compact}:${r.t.category}:${r.stopped || r.broken}:${r.service}:${number === app.ui.selectedTrain}:${r.odd}`;
           let entry = trains.get(number);
@@ -85,14 +96,19 @@ export function GeographicMap({ data }) {
             marker.addTo(map);
           }
           if (entry.state !== state) {
-            entry.marker.setIcon(L.divIcon({ className: 'geo-train-icon', iconSize: compact ? [32, 32] : [66, 28], iconAnchor: compact ? [16, 16] : [33, 14],
-              html: `<span class="geo-train ${compact ? 'compact' : ''} ${r.t.category} ${r.stopped || r.broken ? 'stopped' : ''} ${r.service ? 'service' : ''} ${number === app.ui.selectedTrain ? 'selected' : ''}"><span class="geo-arrow">${r.odd ? '‹' : '›'}</span>${esc(number)}</span>` }));
+            entry.marker.setIcon(L.divIcon({ className: 'geo-train-icon', iconSize: compact ? [44, 44] : [76, 76], iconAnchor: compact ? [22, 22] : [38, 38],
+              html: `<span class="geo-train ${compact ? 'compact' : ''} ${r.t.category} ${r.stopped || r.broken ? 'stopped' : ''} ${r.service ? 'service' : ''} ${number === app.ui.selectedTrain ? 'selected' : ''}">${TRAIN_SVG}<span class="geo-train-number">${esc(number)}</span>${r.stopped || r.broken || r.service ? '<span class="geo-train-stop" aria-hidden="true"></span>' : ''}</span>` }));
             const el = entry.marker.getElement(); el.setAttribute('aria-label', `Выбрать поезд №${number}`); el.setAttribute('role', 'button');
             el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); updateUi({ selectedTrain: number, selectedStation: null }); } };
             entry.marker.unbindTooltip().bindTooltip(`№${esc(number)} · ${esc(r.t.label)}`, { direction: 'top' });
             entry.state = state;
           }
           entry.marker.setLatLng(point);
+          // Sample both sides to retain the track heading at endpoints and while stopped.
+          const behind = map.latLngToLayerPoint(coordinateAt(GEOMETRY, index - .003));
+          const ahead = map.latLngToLayerPoint(coordinateAt(GEOMETRY, index + .003));
+          const angle = Math.atan2(ahead.y - behind.y, ahead.x - behind.x) * 180 / Math.PI + (r.odd ? 180 : 0);
+          entry.marker.getElement().style.setProperty('--train-heading', `${angle}deg`);
           if (followRef.current && number === app.ui.selectedTrain && ts - lastFollow > 1000) { map.panTo(point, { animate: false }); lastFollow = ts; }
         }
         stations.forEach((marker, i) => {
@@ -141,7 +157,7 @@ export function GeographicMap({ data }) {
       </aside>
     </div>
     <div class="geo-legend" aria-label="Обозначения карты"><span><i class="geo-key passenger"></i>Пассажирский</span><span><i class="geo-key freight"></i>Грузовой</span><span><i class="geo-key container"></i>Контейнерный</span><span><i class="geo-key stopped"></i>Стоянка / неисправность</span><span><i class="geo-line closed"></i>Закрытие</span><span><i class="geo-line limited"></i>Ограничение скорости</span></div>
-    <p class="geo-caption">На общем масштабе поезда показаны точками; приблизьте карту, чтобы увидеть номера. География — OpenStreetMap. Расписание, движение поездов и грузовая работа — учебная модель.</p>
+    <p class="geo-caption">Миниатюрные поезда направлены по ходу движения. Приблизьте карту, чтобы увидеть номера. География — OpenStreetMap. Расписание, движение поездов и грузовая работа — учебная модель.</p>
   </section>`;
 }
 
