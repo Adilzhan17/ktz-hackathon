@@ -4,9 +4,8 @@ import { app, act, go, href, updateUi, useLiveNow, liveNow, clock } from './stor
 import { Button, Badge, Segmented } from './ui.js';
 
 // ---- геометрия схемы (условные единицы; SVG масштабируется по ширине) ----
-const MARGIN = 80, STEP = 130, H = 392;
-const Y_ODD = 152, Y_EVEN = 214;           // главные пути: сверху нечётный (←), снизу чётный (→)
-const SIDE = 26;                             // вынос боковых путей станции
+const MARGIN = 90, STEP = 140, H = 440, HALF = 40, CARGO_Y = 330;
+const Y_ODD = 176, Y_EVEN = 240;           // главные пути: сверху нечётный (←), снизу чётный (→)
 const TRAIN_W = 58, TRAIN_H = 20;
 const stationX = i => MARGIN + i * STEP;
 const SPEEDS = [{ value: 1, label: '1' }, { value: 3, label: '3' }, { value: 10, label: '10' }, { value: 30, label: '30' }];
@@ -60,7 +59,7 @@ export function placeTrains(data, tMin) {
       const cx = stationX(loc.idx);
       const yard = loc.kind === 'arrived' && (loc.idx === 0 || loc.idx === data.stations.length - 1);
       rec.x = yard ? cx + (loc.idx === 0 ? -64 : 64) : cx + [-2, 62, -66, 126][n % 4] * (odd ? -1 : 1);
-      rec.y = yard ? (odd ? Y_ODD - 14 * (n + 1) : Y_EVEN + 14 * (n + 1)) : odd ? Y_ODD - SIDE : Y_EVEN + SIDE;
+      rec.y = yard ? (odd ? Y_ODD - 14 * (n + 1) : Y_EVEN + 14 * (n + 1)) : (odd ? Y_ODD - 24 - 20 * (Math.floor(n / 4) % 2) : Y_EVEN + 24 + 20 * (Math.floor(n / 4) % 2));
       rec.stopped = loc.kind === 'wait';
       if (rec.stopped) {
         const side = odd ? loc.idx - 1 : loc.idx;      // перегон, который ждут
@@ -103,11 +102,28 @@ function trainStatus(data, rec, tMin) {
   return `Прибыл на станцию «${name(loc.idx)}».`;
 }
 
-function Station({ s, i, last, tracks, selected, ready, enRoute, onPick }) {
+const TL = { odd: '#c8554d', even: 'var(--accent)' };
+/** Светофор: красный или зелёный. */
+function Light({ x, y, red, label }) {
+  return html`<g transform=${`translate(${x} ${y})`} class="m-tl"><title>${label}: ${red ? 'закрыт' : 'открыт'}</title>
+    <rect x="-5" y="-12" width="10" height="24" rx="5" class="m-tl-body"/>
+    <circle cy="-5" r="3" class=${red ? 'on-red' : 'off'}/><circle cy="5" r="3" class=${red ? 'off' : 'on-green'}/></g>`;
+}
+
+function Station({ s, i, last, tracks, selected, ready, enRoute, onPick, lights }) {
   const cx = stationX(i);
+  const x0 = cx - HALF, x1 = cx + HALF;
   const yard = i === 0 || i === last;
   const dir = i === 0 ? -1 : 1;
   const load = Math.round(s.occupied / s.capacity * 100);
+  // станционные пути над и под главными: ближний и дальний, между ними пассажирская платформа
+  const arm = (y0, sign) => {
+    const y1 = y0 + sign * 24, y2 = y0 + sign * 44, yp = y0 + sign * 34;
+    return html`<g>
+      <path d=${`M${x0 + 8} ${y0} L${x0 + 22} ${y1} H${x1 - 22} L${x1 - 8} ${y0}`} class="m-rail side"/>
+      <path d=${`M${x0 + 22} ${y1} L${x0 + 32} ${y2} H${x1 - 32} L${x1 - 22} ${y1}`} class="m-rail side"/>
+      <rect x=${x0 + 30} y=${yp - 4} width=${x1 - x0 - 60} height="8" rx="2" class="m-plat"/></g>`;
+  };
   return html`<g class="m-station" key=${s.id}>
     <a href=${href(`/station/${s.id}`)} class="m-link" aria-label=${`Станция ${s.name}, ${s.type}, занятость ${load}%`}>
       <title>${`${s.name}: ${s.type.toLowerCase()} станция. Открыть страницу станции`}</title>
@@ -120,21 +136,25 @@ function Station({ s, i, last, tracks, selected, ready, enRoute, onPick }) {
       <rect x=${cx - 15} y="40" width="30" height="30" rx="6" class="m-bld"/>
       <text x=${cx} y="62" text-anchor="middle" class="m-bld-l">${s.id}</text>
     </g>
+    ${!yard && html`<line x1=${x0} x2=${x0} y1="92" y2=${Y_EVEN + 56} class="m-bound"/><line x1=${x1} x2=${x1} y1="92" y2=${Y_EVEN + 56} class="m-bound"/>`}
     ${yard
       ? html`<g class="m-yard">${[-2, -1, 0, 1, 2].map(k => html`<path key=${k} d=${`M${cx} ${k < 0 ? Y_ODD : Y_EVEN} L${cx + dir * 30} ${(Y_ODD + Y_EVEN) / 2 + k * 24} H${cx + dir * 110}`} class="m-rail thin"/>`)}</g>`
       : html`<g class="m-loop">
-          <path d=${`M${cx - 50} ${Y_ODD} L${cx - 34} ${Y_ODD - SIDE} H${cx + 34} L${cx + 50} ${Y_ODD}`} class="m-rail side"/>
-          <path d=${`M${cx - 50} ${Y_EVEN} L${cx - 34} ${Y_EVEN + SIDE} H${cx + 34} L${cx + 50} ${Y_EVEN}`} class="m-rail side"/></g>`}
+          <path d=${`M${x0 + 6} ${Y_ODD} L${x0 + 22} ${Y_EVEN} M${x0 + 6} ${Y_EVEN} L${x0 + 22} ${Y_ODD} M${x1 - 6} ${Y_ODD} L${x1 - 22} ${Y_EVEN} M${x1 - 6} ${Y_EVEN} L${x1 - 22} ${Y_ODD}`} class="m-rail cross"/>
+          ${arm(Y_ODD, -1)}${arm(Y_EVEN, 1)}</g>`}
+    ${!yard && lights && html`<g>
+      <${Light} x=${x0 - 9} y=${Y_EVEN + 14} red=${lights.eEntry} label="Чётное: входной" /><${Light} x=${x1 + 9} y=${Y_EVEN + 14} red=${lights.eExit} label="Чётное: выходной" />
+      <${Light} x=${x1 + 9} y=${Y_ODD - 14} red=${lights.oEntry} label="Нечётное: входной" /><${Light} x=${x0 - 9} y=${Y_ODD - 14} red=${lights.oExit} label="Нечётное: выходной" /></g>`}
     <g class="m-tracks m-pick-area" onClick=${onPick}><title>${`Подъездные пути станции ${s.name}: вагонов ${s.occupied} из ${s.capacity}. Не путать с главными путями: проходящие поезда их не занимают.`}</title>
-      <text x=${cx} y="276" text-anchor="middle" class="m-load-h">подъездные пути</text>
-      ${tracks.map((t, k) => html`<g key=${t.id} transform=${`translate(${cx - 42} ${284 + k * 15})`}>
+      <text x=${cx} y=${CARGO_Y - 8} text-anchor="middle" class="m-load-h">подъездные пути</text>
+      ${tracks.map((t, k) => html`<g key=${t.id} transform=${`translate(${cx - 42} ${CARGO_Y + k * 15})`}>
         <rect width="84" height="10" rx="5" class="m-tr-bg"/>
         <rect width=${84 * t.processing / t.capacity} height="10" rx="5" class="m-tr-work"/>
         <rect x=${84 * t.processing / t.capacity} width=${84 * t.done / t.capacity} height="10" class="m-tr-done"/>
         <rect x=${84 * (t.processing + t.done) / t.capacity} width=${84 * (t.waiting + t.reserved) / t.capacity} height="10" class="m-tr-res"/></g>`)}
-      <text x=${cx} y=${284 + tracks.length * 15 + 10} text-anchor="middle" class="m-load">${s.occupied} / ${s.capacity} ваг.</text>
-      ${ready > 0 && html`<g transform=${`translate(${cx} ${284 + tracks.length * 15 + 28})`}><rect x="-47" y="-12" width="94" height="20" rx="10" class="m-badge on"/><text y="2.5" text-anchor="middle" class="m-badge-t">ждут приёма ${ready}</text></g>`}
-      ${!ready && enRoute > 0 && html`<g transform=${`translate(${cx} ${284 + tracks.length * 15 + 28})`}><rect x="-43" y="-12" width="86" height="20" rx="10" class="m-badge"/><text y="2.5" text-anchor="middle" class="m-badge-t dim">на подходе ${enRoute}</text></g>`}
+      <text x=${cx} y=${CARGO_Y + tracks.length * 15 + 10} text-anchor="middle" class="m-load">${s.occupied} / ${s.capacity} ваг.</text>
+      ${ready > 0 && html`<g transform=${`translate(${cx} ${CARGO_Y + tracks.length * 15 + 30})`}><rect x="-47" y="-12" width="94" height="20" rx="10" class="m-badge on"/><text y="2.5" text-anchor="middle" class="m-badge-t">ждут приёма ${ready}</text></g>`}
+      ${!ready && enRoute > 0 && html`<g transform=${`translate(${cx} ${CARGO_Y + tracks.length * 15 + 30})`}><rect x="-43" y="-12" width="86" height="20" rx="10" class="m-badge"/><text y="2.5" text-anchor="middle" class="m-badge-t dim">на подходе ${enRoute}</text></g>`}
     </g>
   </g>`;
 }
@@ -161,16 +181,21 @@ export function TrackMap({ data }) {
   const live = placeTrains(data, tMin);     // точные положения для кадра
   const seg = data.dispatch.closedSegment;
 
-  // занятость блок-участков → сигналы
-  const occupied = new Set(live.filter(r => r.loc.kind === 'move').map(r => `${r.y === Y_ODD ? 'o' : 'e'}:${r.segment}:${Math.min(2, Math.floor(r.loc.f * 3))}`));
+  // занятость блок-участков (по три на перегон, счёт с запада) → проходные и станционные светофоры
+  const occupied = new Set(live.filter(r => r.loc.kind === 'move').map(r => `${r.y === Y_ODD ? 'o' : 'e'}:${r.segment}:${Math.min(2, Math.floor((r.odd ? 1 - r.loc.f : r.loc.f) * 2.999))}`));
+  const occ = (line, sgm, b) => (line === 'o' && data.blocked && sgm === seg) || occupied.has(`${line}:${sgm}:${b}`);
   const signals = [];
-  for (let sgm = 0; sgm < n - 1; sgm++) for (let b = 0; b < 3; b++) {
-    const x0 = stationX(sgm), x1 = stationX(sgm + 1), L = x1 - x0;
-    const closedOdd = data.blocked && sgm === seg;
-    signals.push({ k: `e${sgm}${b}`, x: x0 + (L * b) / 3 + 14, y: Y_EVEN + 12, red: occupied.has(`e:${sgm}:${b}`) });
-    signals.push({ k: `o${sgm}${b}`, x: x0 + (L * (b + 1)) / 3 - 14, y: Y_ODD - 12, red: closedOdd || occupied.has(`o:${sgm}:${b}`) });
+  for (let sgm = 0; sgm < n - 1; sgm++) {
+    const xs = stationX(sgm) + HALF, L = STEP - 2 * HALF;
+    for (let b = 0; b < 3; b++) {
+      signals.push({ k: `e${sgm}${b}`, x: xs + (L * b) / 3 + 7, y: Y_EVEN + 12, red: occ('e', sgm, b) });
+      signals.push({ k: `o${sgm}${b}`, x: xs + (L * (b + 1)) / 3 - 7, y: Y_ODD - 12, red: occ('o', sgm, b) });
+    }
   }
-
+  const lightsOf = i => ({
+    eEntry: i > 0 && occ('e', i - 1, 2), eExit: i < n - 1 && occ('e', i, 0),
+    oEntry: i < n - 1 && occ('o', i, 2), oExit: i > 0 && occ('o', i - 1, 0),
+  });
   const stopped = live.filter(r => r.stopped);
   const onLine = live.length;
   const sel = selected ? live.find(r => r.t.number === selected) : null;
@@ -208,20 +233,23 @@ export function TrackMap({ data }) {
       <svg width=${width} height=${H * scale} viewBox=${`0 0 ${W} ${H}`} role="group"
         aria-label=${`Схема участка: ${onLine} поездов на линии, ${stopped.length} стоят`}>
         <defs><pattern id="mhatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="var(--danger-line)" stroke-width="3"/></pattern></defs>
-        <text x=${stationX(0) + 90} y=${Y_ODD - 38} class="m-dir">← нечётное направление</text>
-        <text x=${stationX(0) + 90} y=${Y_EVEN + 48} class="m-dir">чётное направление →</text>
-        <line x1=${stationX(0)} x2=${stationX(n - 1)} y1=${Y_ODD} y2=${Y_ODD} class="m-rail"/>
-        <line x1=${stationX(0)} x2=${stationX(n - 1)} y1=${Y_EVEN} y2=${Y_EVEN} class="m-rail"/>
-        ${data.stations.map((s, i) => html`<${Station} key=${s.id} s=${s} i=${i} last=${n - 1} tracks=${s.tracks} selected=${app.ui.selectedStation === s.id}
+        <line x1=${stationX(0)} x2=${stationX(n - 1)} y1=${Y_ODD} y2=${Y_ODD} class="m-rail m-odd"/>
+        <line x1=${stationX(0)} x2=${stationX(n - 1)} y1=${Y_EVEN} y2=${Y_EVEN} class="m-rail m-even"/>
+        ${data.stations.slice(0, -1).map((a, k) => { const xa = stationX(k) + HALF, xb = stationX(k + 1) - HALF, xm = (xa + xb) / 2; return html`<g key=${k} class="m-section">
+          <path d=${`M${xa} 98 H${xb} M${xa + 5} 94 L${xa} 98 L${xa + 5} 102 M${xb - 5} 94 L${xb} 98 L${xb - 5} 102`} class="m-bracket"/>
+          <text x=${xm} y="92" text-anchor="middle" class="m-sect-t">${a.id}–${data.stations[k + 1].id}</text>
+          ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f + 4} ${Y_ODD - 5} L${xa + (xb - xa) * f - 4} ${Y_ODD} L${xa + (xb - xa) * f + 4} ${Y_ODD + 5}`} class="m-chev odd"/>`)}
+          ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f - 4} ${Y_EVEN - 5} L${xa + (xb - xa) * f + 4} ${Y_EVEN} L${xa + (xb - xa) * f - 4} ${Y_EVEN + 5}`} class="m-chev even"/>`)}</g>`; })}
+        ${data.stations.map((s, i) => html`<${Station} key=${s.id} s=${s} i=${i} last=${n - 1} tracks=${s.tracks} lights=${lightsOf(i)} selected=${app.ui.selectedStation === s.id}
           ready=${data.groups.filter(g => g.stationId === s.id && g.status === 'approaching' && g.etaAt <= now).length}
           enRoute=${data.groups.filter(g => g.stationId === s.id && g.status === 'approaching' && g.etaAt > now).length}
           onPick=${() => updateUi({ selectedStation: app.ui.selectedStation === s.id ? null : s.id })} />`)}
         ${data.blocked && html`<g class="m-closed">
-          <rect x=${stationX(seg) + 50} y=${Y_ODD - 12} width=${STEP - 100} height="24" rx="4" fill="url(#mhatch)" class="m-hatch"/>
+          <rect x=${stationX(seg) + HALF} y=${Y_ODD - 12} width=${STEP - 2 * HALF} height="24" rx="4" fill="url(#mhatch)" class="m-hatch"/>
           <g transform=${`translate(${stationX(seg) + STEP / 2} ${Y_ODD})`}><circle r="16" class="m-star"/><path d="M-7 -7 L7 7 M7 -7 L-7 7" class="m-x"/></g>
           <text x=${stationX(seg) + STEP / 2} y=${(Y_ODD + Y_EVEN) / 2 + 5} text-anchor="middle" class="m-closed-t">сход: путь закрыт</text></g>`}
-        ${data.restrictions.map(r => html`<g key=${r.segment} transform=${`translate(${stationX(r.segment) + STEP / 2} ${Y_EVEN + 74})`}>
-          <circle r="17" class="m-sign"/><text y="5" text-anchor="middle" class="m-sign-t">${r.kmh}</text></g>`)}
+        ${data.restrictions.map(r => html`<g key=${r.segment} transform=${`translate(${stationX(r.segment) + STEP / 2} ${Y_EVEN + 38})`}>
+          <circle r="16" class="m-sign"/><text y="5" text-anchor="middle" class="m-sign-t">${r.kmh}</text></g>`)}
         ${signals.map(s => html`<circle key=${s.k} cx=${s.x} cy=${s.y} r="5" class=${`m-sig ${s.red ? 'red' : ''}`}/>`)}
         ${live.map(rec => {
           const { t } = rec;
@@ -250,10 +278,17 @@ export function TrackMap({ data }) {
         <span class=${hovered.t.delay > 0 ? 'bad' : ''}>Прибытие ${clockAt(data, hovered.t.forecast.at(-1)[0])} · ${delayText(hovered.t.delay)}</span>
       </div>`}
     </div>
-    <div class="map-legend" aria-label="Обозначения">
+    <div class="map-legend" aria-label="Условные обозначения">
+      <span><svg width="34" height="10" aria-hidden="true"><line x1="2" y1="5" x2="32" y2="5" stroke="#c8554d" stroke-width="4" stroke-linecap="round"/><path d="M12 1 L6 5 L12 9" fill="none" stroke="#c8554d" stroke-width="2"/></svg>Главный путь, нечётное направление (←)</span>
+      <span><svg width="34" height="10" aria-hidden="true"><line x1="2" y1="5" x2="32" y2="5" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/><path d="M24 1 L30 5 L24 9" fill="none" stroke="var(--accent)" stroke-width="2"/></svg>Главный путь, чётное направление (→)</span>
+      <span><svg width="34" height="10" aria-hidden="true"><line x1="2" y1="5" x2="32" y2="5" stroke="#a5b4be" stroke-width="3" stroke-linecap="round"/></svg>Станционный путь</span>
+      <span><i class="lg-plat"></i>Пассажирская платформа</span>
+      <span><svg width="12" height="20" aria-hidden="true"><rect x="1" y="1" width="10" height="18" rx="5" fill="#26333c"/><circle cx="6" cy="6" r="3" fill="#2d3c47"/><circle cx="6" cy="14" r="3" fill="#3fb37f"/></svg>Светофор: входной / выходной</span>
+      <span><i class="lg-sig"></i>Блок-сигнал: свободен</span><span><i class="lg-sig red"></i>занят / закрыт</span>
+      <span><svg width="8" height="18" aria-hidden="true"><line x1="4" y1="0" x2="4" y2="18" stroke="#8798a4" stroke-dasharray="3 3"/></svg>Граница станции</span>
+      <span class="lg-sep"></span>
       ${[1, 2, 3].map(p => html`<span key=${p}><i class="lg-train" style=${`background:${FILL[p]}`}></i>${PRIORITY[p].short}</span>`)}
       <span><i class="lg-train stopped"></i>Стоит и ждёт</span>
-      <span><i class="lg-sig"></i>Сигнал: путь свободен</span><span><i class="lg-sig red"></i>занят / закрыт</span>
     </div>
     <div class="map-info" role="region" aria-label="Выбранный поезд" aria-live="polite">
       ${selTrain ? (sel ? html`<div class="info-main"><strong>№${selTrain.number}</strong><${Badge} tone=${PRIORITY[selTrain.priority].tone}>${selTrain.label}</${Badge}>
