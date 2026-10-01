@@ -35,7 +35,7 @@ const Section = ({ id, icon, eyebrow, title, lead, children }) => html`<section 
 export function HowPage() {
   const active = useScrollSpy(SECTIONS.map(s => s.id));
   const jump = (e, id) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  return html`<${PageHeader} title="Как это работает" subtitle="Задача, факторы, алгоритм и живые примеры. Всё на этой странице можно нажимать." actions=${html`<${Button} icon="file-down" onClick=${() => window.print()}>Экспортировать PDF</${Button>}`} />
+  return html`<${PageHeader} title="Как это работает" subtitle="Задача, факторы, алгоритм и живые примеры. Всё на этой странице можно нажимать." actions=${html`<${Button} icon="file-down" onClick=${() => window.print()}>Экспортировать PDF</${Button}>`} />
     <div class="how-layout">
       <nav class="how-toc" aria-label="Разделы страницы"><ul>${SECTIONS.map(s => html`<li key=${s.id}><a href=${`#${s.id}`} class=${active === s.id ? 'on' : ''} aria-current=${active === s.id ? 'true' : undefined} onClick=${e => jump(e, s.id)}><${Icon} name=${s.icon} size=${16} />${s.title}</a></li>`)}</ul></nav>
       <div class="how-body">
