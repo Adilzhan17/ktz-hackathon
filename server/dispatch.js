@@ -22,6 +22,8 @@ export const NOTIFY_THRESHOLD = 5; // с какой задержки пасса�
 export const PRIORITY_NAMES = { 1: 'Пассажирские', 2: 'Контейнерные и транзитные', 3: 'Сборные и прочие грузовые' };
 const WEIGHT = { 1: 10, 2: 2, 3: 1 };
 
+/** Приоритет с учётом решения диспетчера «пропустить первым». */
+export const prioOf = (state, train) => state.overrides?.[train.number] ?? train.priority;
 export const directionOf = train => (train.route[0][1] < train.route.at(-1)[1] ? 'even' : 'odd');
 
 const VARIANTS = [
@@ -49,6 +51,10 @@ function naturalTimeline(state, train) {
   const dir = directionOf(train);
   const points = [[train.route[0][0], train.route[0][1]]];
   let t = train.route[0][0];
+  // Задержка по решению диспетчера: поезд стоит на станции, дальше всё сдвигается.
+  const hold = idx => (state.holds || []).find(h => h.train === train.number && h.station === idx);
+  const dwell = idx => { const h = hold(idx); if (h) { t += h.minutes; points.push([t, idx]); } };
+  dwell(train.route[0][1]);
   for (let k = 1; k < train.route.length; k++) {
     const segment = Math.min(train.route[k - 1][1], train.route[k][1]);
     let factor = 1;
@@ -57,6 +63,7 @@ function naturalTimeline(state, train) {
     if (closed && segment === CLOSED_SEGMENT && dir === 'odd') factor *= WRONG_TRACK_FACTOR;
     t += Math.round((train.route[k][0] - train.route[k - 1][0]) * factor);
     points.push([t, train.route[k][1]]);
+    dwell(train.route[k][1]);
   }
   return points;
 }
@@ -131,7 +138,7 @@ function evaluate(state, variantId) {
     const items = [];
     for (const train of trains) {
       const c = crossing(natural.get(train.number));
-      if (c) items.push({ train, dir: directionOf(train), priority: train.priority, enter: c.enter, duration: c.exit - c.enter, k: c.k });
+      if (c) items.push({ train, dir: directionOf(train), priority: prioOf(state, train), enter: c.enter, duration: c.exit - c.enter, k: c.k });
     }
     const { result, order: o } = scheduleClosure(items, variantId);
     order = o.map(number => {
@@ -153,8 +160,9 @@ function metrics(state, delays) {
   for (const train of state.trains) {
     const d = delays.get(train.number);
     if (d <= 0) continue;
-    delayed += 1; total += d; weighted += d * WEIGHT[train.priority];
-    if (train.priority === 1) passenger += d;
+    const pr = prioOf(state, train);
+    delayed += 1; total += d; weighted += d * WEIGHT[pr];
+    if (pr === 1) passenger += d;
     max = Math.max(max, d);
   }
   return { total, weighted, passenger, max, delayedTrains: delayed };
@@ -173,8 +181,8 @@ function conflicts(state) {
     const a = items[i], b = items[j];
     if (a.dir === b.dir) continue;
     if (a.enter < b.exit + MARGIN && b.enter < a.exit + MARGIN) {
-      out.push({ a: { train: a.train.number, label: a.train.label, priority: a.train.priority, dir: a.dir, enter: a.enter, exit: a.exit },
-        b: { train: b.train.number, label: b.train.label, priority: b.train.priority, dir: b.dir, enter: b.enter, exit: b.exit } });
+      out.push({ a: { train: a.train.number, label: a.train.label, priority: prioOf(state, a.train), dir: a.dir, enter: a.enter, exit: a.exit },
+        b: { train: b.train.number, label: b.train.label, priority: prioOf(state, b.train), dir: b.dir, enter: b.enter, exit: b.exit } });
     }
   }
   return out.sort((x, y) => Math.min(x.a.priority, x.b.priority) - Math.min(y.a.priority, y.b.priority) || x.a.enter - y.a.enter);
@@ -222,7 +230,7 @@ export function computePlan(state) {
 
 const memo = new WeakMap();
 export function getPlan(state) {
-  const key = JSON.stringify([state.blocked, state.variant, state.restrictions]);
+  const key = JSON.stringify([state.blocked, state.variant, state.restrictions, state.holds, state.overrides]);
   const cached = memo.get(state);
   if (cached?.key === key) return cached.plan;
   const plan = computePlan(state);

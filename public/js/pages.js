@@ -3,7 +3,8 @@ import { html, Icon, count, delayText, clockAt, duration, PRIORITY, DIRECTION, d
 import { app, go, href, updateUi } from './store.js';
 import { Button, Badge, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { Gantt } from './gantt.js';
-import { TrackMap, StoppedList } from './trackmap.js';
+import { TrackMap } from './trackmap.js';
+import { DispatcherPanel } from './panel.js';
 import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
 
 const stationName = (data, i) => data.stations[i].name;
@@ -22,6 +23,7 @@ export function Overview({ data }) {
         <small>Сверху нечётный путь (←), снизу чётный (→). Кружки у путей — проходные светофоры автоблокировки.</small></div></div>
       <${TrackMap} data=${data} />
     </section>
+    <${DispatcherPanel} data=${data} />
     <section class="kpis" aria-label="Показатели участка">
       <${Kpi} label="Состояние участка" icon="activity" tone=${incident ? 'danger' : 'neutral'}
         value=${incident ? 'Инцидент' : data.restrictions.length ? 'Ограничения' : 'Норма'}
@@ -42,7 +44,6 @@ export function Overview({ data }) {
       </section>
       <aside class="aside" aria-label="Что требует внимания">
         <${AttentionCard} data=${data} />
-        <${StoppedList} data=${data} />
         <${LateList} data=${data} />
       </aside>
     </div>`;

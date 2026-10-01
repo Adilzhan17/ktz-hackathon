@@ -22,7 +22,7 @@ export function useLiveNow(fps = 1) {
 export const app = {
   data: null, online: false, failed: false, busy: false,
   route: { page: 'overview', params: {} },
-  ui: { category: 'all', selectedTrain: null, zoom: 8, shift: 0, follow: true },
+  ui: { category: 'all', selectedTrain: null, selectedStation: null, zoom: 8, shift: 0, follow: true },
   toasts: [],
 };
 

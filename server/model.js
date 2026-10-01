@@ -1,4 +1,4 @@
-import { getPlan, directionOf, CLOSED_SEGMENT, NOTIFY_THRESHOLD, PRIORITY_NAMES } from './dispatch.js';
+import { getPlan, directionOf, prioOf, CLOSED_SEGMENT, NOTIFY_THRESHOLD, PRIORITY_NAMES } from './dispatch.js';
 export const BASE_TIME = Date.parse('2026-10-01T09:00:00+05:00');
 const minute = 60_000;
 // Names and distances describe a fictional demonstration corridor, not a real route.
@@ -86,7 +86,7 @@ export function createState() {
     };
   });
   return {
-    now: BASE_TIME, revision: 0, running: false, speed: 3, stations, trains, groups, blocked: false, planApproved: false, variant: null, restrictions: [], notified: {}, notifications: [],
+    now: BASE_TIME, revision: 0, running: false, speed: 3, holds: [], overrides: {}, stations, trains, groups, blocked: false, planApproved: false, variant: null, restrictions: [], notified: {}, notifications: [],
     log: [{ at: BASE_TIME, text: 'Учебная смена: 10 станций, 30 поездов (6 пассажирских, 15 грузовых, 9 контейнерных). Число вагонов задано отдельно для каждого состава.' }],
   };
 }
@@ -135,7 +135,7 @@ export function snapshot(state) {
   });
   const plan = getPlan(state);
   const groups = state.groups.map(g => groupView(state, g, plan)).sort((a, b) => (a.slackMinutes ?? Infinity) - (b.slackMinutes ?? Infinity) || a.id.localeCompare(b.id));
-  const trains = state.trains.map(t => ({ ...t, direction: directionOf(t), forecast: plan.byTrain[t.number].forecast, delay: plan.byTrain[t.number].delay }));
+  const trains = state.trains.map(t => ({ ...t, priority: prioOf(state, t), basePriority: t.priority, overridden: t.number in state.overrides, direction: directionOf(t), forecast: plan.byTrain[t.number].forecast, delay: plan.byTrain[t.number].delay }));
   const { byTrain, ...dispatch } = plan;
   const end = endAt(state);
   return { ...state, endAt: end, ended: state.now >= end, baseTime: BASE_TIME, trains, stations, groups, cargoNames, priorityNames: PRIORITY_NAMES,
@@ -149,7 +149,7 @@ function notifyPassengers(state) {
   if (state.blocked && !state.planApproved) return;
   const plan = getPlan(state);
   for (const train of state.trains) {
-    if (train.priority !== 1) continue;
+    if (prioOf(state, train) !== 1) continue;
     const delay = plan.byTrain[train.number].delay;
     const last = state.notified[train.number] || 0;
     if (Math.abs(delay - last) < NOTIFY_THRESHOLD && !(delay === 0 && last > 0)) continue;
@@ -238,6 +238,48 @@ export function act(state, action) {
       t.processing += start; t.waiting += g.count - start; g.status = 'arrived';
       event(state, `${station.name}: принято ${g.count} ваг. группы №${g.train} на путь ${t.number}; ${start} подано на грузовой фронт.`);
     }
+  } else if (action.type === 'hold' || action.type === 'release' || action.type === 'expedite' || action.type === 'restore') {
+    const train = state.trains.find(t => t.number === action.train);
+    assert(train, 'Поезд не найден');
+    const before = getPlan(state).metrics;
+    let text;
+    if (action.type === 'hold') {
+      assert([5, 10, 20, 30].includes(action.minutes), 'Задержка: 5, 10, 20 или 30 минут');
+      const forecast = getPlan(state).byTrain[train.number].forecast;
+      const tNow = (state.now - BASE_TIME) / minute;
+      assert(tNow < forecast.at(-1)[0], 'Поезд уже прибыл');
+      const ahead = tNow < forecast[0][0] ? forecast[0] : forecast.find(([m]) => m > tNow);
+      assert(ahead && ahead !== forecast.at(-1), 'Дальше только конечная станция: задерживать некуда');
+      state.holds = state.holds.filter(h => !(h.train === train.number && h.station === ahead[1]));
+      assert(state.holds.length < 8, 'Не больше восьми задержек одновременно');
+      state.holds.push({ train: train.number, station: ahead[1], minutes: action.minutes });
+      text = `№${train.number} задержан на станции «${state.stations[ahead[1]].name}» на ${action.minutes} мин по решению диспетчера.`;
+    } else if (action.type === 'release') {
+      assert(state.holds.some(h => h.train === train.number), 'У этого поезда нет задержки');
+      state.holds = state.holds.filter(h => h.train !== train.number);
+      text = `Задержка №${train.number} снята.`;
+    } else if (action.type === 'expedite') {
+      assert(train.priority > 1 && !(train.number in state.overrides), 'Поезд уже пропускается первым');
+      state.overrides[train.number] = 1;
+      text = `№${train.number} (${train.label}) пропускается первым: приоритет повышен до пассажирского.`;
+    } else {
+      assert(train.number in state.overrides, 'Приоритет не менялся');
+      delete state.overrides[train.number];
+      text = `Приоритет №${train.number} возвращён к исходному.`;
+    }
+    const after = getPlan(state).metrics;
+    const d = after.total - before.total;
+    event(state, `${text} Суммарная задержка поездов: ${before.total} → ${after.total} мин (${d > 0 ? '+' : ''}${d}).`);
+    notifyPassengers(state);
+  } else if (action.type === 'accept') {
+    const g = state.groups.find(g => g.id === action.groupId);
+    assert(g, 'Группа вагонов не найдена');
+    const view = groupView(state, g);
+    assert(g.status === 'approaching', 'Группа уже запланирована');
+    assert(view.etaAt <= state.now, 'Группа ещё в пути: ожидайте прибытия');
+    assert(view.eligible, 'Нет свободной ёмкости на подходящем пути');
+    act(state, { type: 'reserve', groupId: g.id });
+    act(state, { type: 'arrive', groupId: g.id });
   } else if (action.type === 'clock') {
     if (action.speed !== undefined) { assert(SPEEDS.includes(action.speed), 'Скорость времени: 1, 3, 10 или 30 мин/с'); state.speed = action.speed; }
     if (action.running !== undefined) {

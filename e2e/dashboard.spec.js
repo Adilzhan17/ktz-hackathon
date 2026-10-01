@@ -247,13 +247,13 @@ test('live map: trains are drawn, move with time, closure makes some stand and w
   const before = await map.locator('.mtrain').first().getAttribute('transform');
   await request.post('/api/action', { data: { type: 'advance', minutes: 15 } });
   await expect.poll(() => map.locator('.mtrain').first().getAttribute('transform')).not.toBe(before);
-  await expect(page.getByRole('heading', { name: 'Стоят и ждут' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Панель диспетчера' })).toBeVisible();
   await request.post('/api/action', { data: { type: 'block' } });
   await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
   await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
   await expect(map.locator('.m-closed')).toBeVisible();
   await expect(map.locator('.mtrain.stopped').first()).toBeVisible();
-  await expect(page.locator('.stop-row').first()).toContainText('ждёт');
+  await expect(page.locator('.task-danger', { hasText: 'стоит на' }).first()).toContainText('ждёт');
   // выбор поезда: подробности под схемой
   await map.locator('.mtrain').first().click();
   await expect(page.locator('.map-info')).toContainText('№');
@@ -278,4 +278,47 @@ test('menu can be collapsed to give the map more room and the choice is remember
   await expect.poll(async () => (await page.locator('.nav').boundingBox()).width).toBeLessThan(w0 / 2);
   await page.reload();
   expect((await page.locator('.nav').boundingBox()).width).toBeLessThan(w0 / 2);
+});
+
+test('dispatcher panel: tasks, approve from the task, expedite a stopped train', async ({ page, request }) => {
+  await page.goto('/');
+  const panel = page.locator('.dispatcher');
+  await expect(panel).toContainText('Задач нет');
+  await request.post('/api/action', { data: { type: 'block' } });
+  const approve = panel.locator('.task', { hasText: 'Подтвердите вариант пропуска' });
+  await expect(approve).toBeVisible();
+  await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
+  await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
+  const stopTask = panel.locator('.task', { hasText: 'стоит на' }).first();
+  await expect(stopTask).toBeVisible();
+  await stopTask.getByRole('button', { name: 'Пропустить первым' }).click();
+  await expect(page.locator('.toast').last()).toContainText('пропускается первым');
+  await approve.getByRole('button', { name: 'Подтвердить' }).click();
+  await expect(approve).toHaveCount(0);
+});
+
+test('dispatcher panel: hold a selected train on its next station and release it', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('.mtrain').first().click();
+  const panel = page.locator('.dispatcher');
+  await expect(panel.locator('.tc-num')).toBeVisible();
+  await panel.getByRole('radio', { name: '20' }).click();
+  await panel.getByRole('button', { name: 'Задержать на 20 мин' }).click();
+  await expect(page.locator('.toast').last()).toContainText('задержан на станции');
+  await expect(panel.locator('.tc-head')).toContainText('+20 мин');
+  await panel.getByRole('button', { name: 'Снять задержки' }).click();
+  await expect(panel.locator('.tc-head')).toContainText('по графику');
+});
+
+test('map is tied to data: arrived wagon groups are flagged on the station and can be accepted from the panel', async ({ page, request }) => {
+  await page.goto('/');
+  for (let i = 0; i < 10; i++) await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
+  await expect(page.locator('.m-badge.on').first()).toBeVisible();
+  await page.locator('.m-pick').nth(3).click();                       // станция D
+  const panel = page.locator('.dispatcher');
+  await expect(panel.locator('.tc-num')).toHaveText('Казан');
+  const accept = panel.getByRole('button', { name: 'Принять' }).first();
+  await expect(accept).toBeEnabled();
+  await accept.click();
+  await expect(page.locator('.toast').last()).toContainText('принято');
 });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createState, act, snapshot, trackView, groupView } from '../server/model.js';
+import { createState, act, snapshot, trackView, groupView, tick } from '../server/model.js';
 
 test('completion preserves physical occupancy; removal releases the wagons', () => {
   const state = createState();
@@ -242,4 +242,36 @@ test('clock: invalid speed or flag is rejected without changing state', () => {
   const before = JSON.stringify(state);
   for (const bad of [{ speed: 7 }, { speed: 'fast' }, { running: 'yes' }]) assert.throws(() => act(state, { type: 'clock', ...bad }));
   assert.equal(JSON.stringify(state), before);
+});
+
+test('dispatcher levers: hold shifts the train, expedite changes the plan, both can be undone', () => {
+  const state = createState();
+  const base = snapshot(state).trains.find(t => t.number === '2085');
+  assert.equal(base.delay, 0);
+  assert.throws(() => act(state, { type: 'hold', train: '2085', minutes: 7 }), /5, 10, 20 или 30/);
+  const held = act(state, { type: 'hold', train: '2085', minutes: 20 }).trains.find(t => t.number === '2085');
+  assert.equal(held.delay, 20);
+  assert.ok(held.forecast.some(([, i], k) => k && i === held.forecast[k - 1][1]), 'есть стоянка на станции');
+  assert.ok(state.log[0].text.includes('Суммарная задержка'));
+  assert.equal(act(state, { type: 'release', train: '2085' }).trains.find(t => t.number === '2085').delay, 0);
+  assert.throws(() => act(state, { type: 'release', train: '2085' }), /нет задержки/);
+  act(state, { type: 'block' });
+  const before = snapshot(state);
+  const slow = before.trains.find(t => t.number === '3401');
+  assert.equal(slow.priority, 2);
+  const after = act(state, { type: 'expedite', train: '3401' });
+  assert.equal(after.trains.find(t => t.number === '3401').priority, 1);
+  assert.ok(after.trains.find(t => t.number === '3401').delay <= slow.delay);
+  assert.throws(() => act(state, { type: 'expedite', train: '3401' }), /уже/);
+  assert.equal(act(state, { type: 'restore', train: '3401' }).trains.find(t => t.number === '3401').priority, 2);
+});
+
+test('accept takes a group that has arrived in one step and refuses early or impossible ones', () => {
+  const state = createState();
+  const g = snapshot(state).groups.find(g => g.eligible);
+  assert.throws(() => act(state, { type: 'accept', groupId: g.id }), /ещё в пути/);
+  tick(state, 600);
+  const snap = act(state, { type: 'accept', groupId: g.id });
+  assert.equal(snap.groups.find(x => x.id === g.id).status, 'arrived');
+  assert.throws(() => act(state, { type: 'accept', groupId: g.id }), /уже запланирована/);
 });

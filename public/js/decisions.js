@@ -69,12 +69,13 @@ export function IncidentPanel({ data }) {
 }
 
 /** Ввод событий: закрытие перегона, ограничения скорости. */
-export function Scenarios({ data }) {
+export function Scenarios({ data, bare = false }) {
   const [segment, setSegment] = useState(String(data.dispatch.closedSegment + 1));
   const [kmh, setKmh] = useState('25');
   const segs = data.stations.slice(0, -1).map((s, i) => ({ i, label: `${s.id}–${data.stations[i + 1].id} · ${s.name} — ${data.stations[i + 1].name}` }));
-  return html`<section class="panel" aria-labelledby="ev-title">
-    <div class="panel-head"><h2 id="ev-title">События на участке</h2><${Icon} name="construction" size=${18} /></div>
+  const Wrap = bare ? 'div' : 'section';
+  return html`<${Wrap} class=${bare ? 'events-bare' : 'panel'} aria-labelledby=${bare ? undefined : 'ev-title'}>
+    ${!bare && html`<div class="panel-head"><h2 id="ev-title">События на участке</h2><${Icon} name="construction" size=${18} /></div>`}
     <div class="event-card">
       <div><h3>Сход подвижного состава</h3><p class="muted">Закрывает нечётный путь перегона D–E. Система найдёт конфликты и предложит варианты пропуска.</p></div>
       ${data.blocked
@@ -101,7 +102,7 @@ export function Scenarios({ data }) {
       <ul>${data.restrictions.map(r => html`<li key=${r.segment}><${Icon} name="gauge" size=${16} />
         <span><strong>${data.stations[r.segment].id}–${data.stations[r.segment + 1].id}</strong> · ${r.kmh} км/ч</span>
         <${Button} variant="ghost" size="sm" icon="x" onClick=${() => act({ type: 'unrestrict', segment: r.segment })}>Снять</${Button}></li>`)}</ul></div>`}
-  </section>`;
+  </${Wrap}>`;
 }
 
 export function PassengerNotices({ data, limit = 5 }) {

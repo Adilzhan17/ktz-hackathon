@@ -20,11 +20,19 @@
 .m-stype { font-size: 11px; fill: var(--text-3); }
 .m-bld { fill: #fff; stroke: var(--line-strong); stroke-width: 1.5; transition: stroke var(--ease), fill var(--ease); }
 .m-bld-l { font-size: 16px; font-weight: 700; fill: var(--accent-ink); }
-.m-station a:hover .m-bld { fill: var(--accent-bg); stroke: var(--accent); }
-.m-station a:hover { text-decoration: none; }
 .m-tr-bg { fill: #e1e9ee; }
 .m-tr-work { fill: var(--accent); }
 .m-tr-done { fill: #123d54; }
+.m-tr-res { fill: var(--accent-line); }
+.m-load-h { font-size: 11px; fill: var(--text-3); letter-spacing: .04em; }
+.m-pick { cursor: pointer; outline: none; }
+.m-pick:hover .m-bld, .m-pick:focus-visible .m-bld { fill: var(--accent-bg); stroke: var(--accent); }
+.m-pick.on .m-bld { fill: var(--accent); stroke: var(--accent); }
+.m-pick.on .m-bld-l { fill: #fff; }
+.m-badge { fill: #eef3f6; stroke: var(--line-strong); }
+.m-badge.on { fill: var(--accent); stroke: var(--accent); }
+.m-badge-t { font-size: 12px; font-weight: 650; fill: #fff; }
+.m-badge-t.dim { fill: var(--text-2); font-weight: 500; }
 .m-load { font-size: 12px; fill: var(--text-3); }
 .m-hatch { stroke: var(--danger); stroke-dasharray: 5 4; fill-opacity: .6; }
 .m-star { fill: var(--danger); }
@@ -62,3 +70,7 @@
   .speed .muted { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .m-pulse { animation: none; } }
+.m-link { cursor: pointer; }
+.m-link:hover .m-sname { fill: var(--accent); text-decoration: underline; }
+.m-pick-area { cursor: pointer; }
+.m-pick-area:hover .m-tr-bg { fill: #d3dfe7; }
