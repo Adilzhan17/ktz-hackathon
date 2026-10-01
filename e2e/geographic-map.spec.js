@@ -25,9 +25,9 @@ test('map selection, train movement and layer controls share the dispatcher stat
   await request.post('/api/action', { data: { type: 'advance', minutes: 15 } });
   await expect.poll(() => marker.getAttribute('style')).not.toBe(transform);
   await page.getByLabel('Слой OpenRailwayMap').uncheck();
-  await expect(page.locator('.geo-map .leaflet-tile-container')).toHaveCount(1);
+  await expect(page.locator('.geo-map img[src*="tiles.openrailwaymap.org"]')).toHaveCount(0);
   await page.getByLabel('Слой OpenRailwayMap').check();
-  await expect(page.locator('.geo-map .leaflet-tile-container')).toHaveCount(2);
+  await expect(page.locator('.geo-map img[src*="tiles.openrailwaymap.org"]').first()).toBeAttached();
   expect(errors).toEqual([]);
 });
 
