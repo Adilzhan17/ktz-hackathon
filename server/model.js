@@ -1,3 +1,4 @@
+import { getPlan, directionOf, CLOSED_SEGMENT, NOTIFY_THRESHOLD, PRIORITY_NAMES } from './dispatch.js';
 export const BASE_TIME = Date.parse('2026-10-01T09:00:00+05:00');
 const minute = 60_000;
 // Names and distances describe a fictional demonstration corridor, not a real route.
@@ -67,6 +68,11 @@ export function createState() {
       route, affectedFrom: crossing < 0 ? null : crossing,
     });
   }
+  // Приоритет: 1 — пассажирские, 2 — контейнерные и транзитные, 3 — сборные и прочие грузовые.
+  for (const t of trains) {
+    t.priority = t.category === 'passenger' ? 1 : t.category === 'container' || t.deadlineHours <= 48 ? 2 : 3;
+    if (t.category === 'freight') t.label = t.priority === 2 ? (t.deadlineHours <= 24 ? 'Срочный грузовой' : 'Транзитный грузовой') : 'Сборный';
+  }
   const groups = trains.filter(t => t.cargo).map((train, i) => {
     const origin = stations[train.route[0][1]];
     const [etaMinutes, destinationIndex] = train.route.at(-1);
@@ -80,7 +86,7 @@ export function createState() {
     };
   });
   return {
-    now: BASE_TIME, revision: 0, stations, trains, groups, blocked: false, planApproved: false,
+    now: BASE_TIME, revision: 0, stations, trains, groups, blocked: false, planApproved: false, variant: null, restrictions: [], notified: {}, notifications: [],
     log: [{ at: BASE_TIME, text: 'Учебная смена: 10 станций, 30 поездов (6 пассажирских, 15 грузовых, 9 контейнерных). Число вагонов задано отдельно для каждого состава.' }],
   };
 }
@@ -97,7 +103,7 @@ export function trackView(state, track) {
     releaseAt: occupiedCount ? Math.max(state.now, track.processing ? track.finishAt : state.now) + (30 + Math.ceil(track.waiting / track.front) * (track.duration + 30)) * minute : null,
   };
 }
-export function groupView(state, group) {
+export function groupView(state, group, plan = getPlan(state)) {
   const station = state.stations.find(s => s.id === group.stationId);
   const tracks = station.tracks.filter(t => t.cargo === group.cargo).map(t => trackView(state, t));
   const operationMinutes = t => Math.ceil(group.count / t.front) * (t.duration + 30);
@@ -105,11 +111,11 @@ export function groupView(state, group) {
   const best = matching[0];
   const assigned = tracks.find(t => t.id === group.trackId);
   const processingMinutes = assigned ? operationMinutes(assigned) : best ? operationMinutes(best) : tracks.length ? Math.min(...tracks.map(operationMinutes)) : null;
-  const affected = state.trains.find(t => t.number === group.train)?.affectedFrom != null;
-  const etaAt = group.etaAt + (state.blocked && affected ? 40 * minute : 0);
+  const delay = plan.byTrain[group.train]?.delay || 0;
+  const etaAt = group.etaAt + delay * minute;
   const slackMinutes = processingMinutes === null ? null : Math.floor((group.deadlineAt - Math.max(state.now, etaAt)) / minute - processingMinutes);
   const eligible = group.status === 'approaching' && Boolean(best);
-  return { ...group, etaAt, slackMinutes, processingMinutes, eligible,
+  return { ...group, etaAt, delayMinutes: delay, slackMinutes, processingMinutes, eligible,
     suggestedTrack: best?.id ?? null,
     available: tracks.reduce((n, t) => n + t.available, 0),
     maxBatch: Math.max(0, ...tracks.map(t => t.available)),
@@ -127,11 +133,35 @@ export function snapshot(state) {
     }, {});
     return { ...station, tracks, ...sums };
   });
-  const groups = state.groups.map(g => groupView(state, g)).sort((a, b) => (a.slackMinutes ?? Infinity) - (b.slackMinutes ?? Infinity) || a.id.localeCompare(b.id));
-  return { ...state, stations, groups, cargoNames };
+  const plan = getPlan(state);
+  const groups = state.groups.map(g => groupView(state, g, plan)).sort((a, b) => (a.slackMinutes ?? Infinity) - (b.slackMinutes ?? Infinity) || a.id.localeCompare(b.id));
+  const trains = state.trains.map(t => ({ ...t, direction: directionOf(t), forecast: plan.byTrain[t.number].forecast, delay: plan.byTrain[t.number].delay }));
+  const { byTrain, ...dispatch } = plan;
+  return { ...state, trains, stations, groups, cargoNames, priorityNames: PRIORITY_NAMES,
+    dispatch: { ...dispatch, closedSegment: CLOSED_SEGMENT, selected: dispatch.selectedId, approved: state.planApproved } };
 }
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
+const clock = (state, ms) => new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Almaty', hour: '2-digit', minute: '2-digit' }).format(ms);
+// Пассажирам уходит уведомление, когда прогноз опоздания заметно изменился (и план не ждёт подтверждения).
+function notifyPassengers(state) {
+  if (state.blocked && !state.planApproved) return;
+  const plan = getPlan(state);
+  for (const train of state.trains) {
+    if (train.priority !== 1) continue;
+    const delay = plan.byTrain[train.number].delay;
+    const last = state.notified[train.number] || 0;
+    if (Math.abs(delay - last) < NOTIFY_THRESHOLD && !(delay === 0 && last > 0)) continue;
+    const dest = state.stations[train.route.at(-1)[1]].name;
+    const arrival = clock(state, BASE_TIME + (train.route.at(-1)[0] + delay) * minute);
+    state.notified[train.number] = delay;
+    const text = delay > 0
+      ? `Поезд №${train.number}: прибытие на станцию «${dest}» ожидается в ${arrival}, опоздание ${delay} мин.`
+      : `Поезд №${train.number}: движение восстановлено, прибытие на станцию «${dest}» по расписанию.`;
+    state.notifications.unshift({ at: state.now, train: train.number, delay, text });
+  }
+  state.notifications = state.notifications.slice(0, 50);
+}
 function event(state, text) {
   state.revision += 1;
   state.log.unshift({ at: state.now, text });
@@ -190,12 +220,38 @@ export function act(state, action) {
       event(state, `${station.name}: принято ${g.count} ваг. группы №${g.train} на путь ${t.number}; ${start} подано на грузовой фронт.`);
     }
   } else if (action.type === 'block') {
-    state.blocked = !state.blocked; state.planApproved = false;
-    event(state, state.blocked ? 'Учебное закрытие нечётного пути D–E. Подготовлена схема пропуска; прогноз поездов через D–E +40 мин.' : 'Ограничение D–E снято. Восстановлен исходный прогноз подхода.');
+    state.blocked = !state.blocked; state.planApproved = false; state.variant = null;
+    const plan = getPlan(state);
+    event(state, state.blocked
+      ? `Закрыт нечётный путь перегона D–E (сход подвижного состава). Встречных конфликтов: ${plan.conflicts.length}. Рекомендуемый вариант: «${plan.variants.find(v => v.recommended).name}».`
+      : 'Перегон D–E открыт. Восстановлен исходный прогноз движения.');
+    notifyPassengers(state);
+  } else if (action.type === 'variant') {
+    assert(state.blocked && !state.planApproved, 'Нет варианта, который можно выбрать');
+    assert(getPlan(state).variants.some(v => v.id === action.variantId), 'Неизвестный вариант пропуска');
+    state.variant = action.variantId;
+    event(state, `Выбран вариант пропуска «${getPlan(state).variants.find(v => v.id === action.variantId).name}». Прогноз пересчитан, подтверждения ещё нет.`);
   } else if (action.type === 'approve') {
     assert(state.blocked && !state.planApproved, 'Нет нового варианта для подтверждения');
     state.planApproved = true;
-    event(state, 'Диспетчер подтвердил учебный вариант: №153 первым по соседнему пути; грузовые №3401 и №2085 получают задержку 40 минут.');
+    const plan = getPlan(state);
+    const variant = plan.variants.find(v => v.id === plan.selectedId);
+    event(state, `Диспетчер подтвердил вариант «${variant.name}»: суммарная задержка ${variant.metrics.total} мин, пассажирских ${variant.metrics.passenger} мин.`);
+    notifyPassengers(state);
+  } else if (action.type === 'restrict') {
+    assert(Number.isInteger(action.segment) && action.segment >= 0 && action.segment < state.stations.length - 1, 'Некорректный перегон');
+    assert(Number.isInteger(action.kmh) && action.kmh >= 15 && action.kmh < 80, 'Ограничение скорости: от 15 до 79 км/ч');
+    state.restrictions = state.restrictions.filter(r => r.segment !== action.segment);
+    assert(state.restrictions.length < 6, 'Не больше шести ограничений одновременно');
+    state.restrictions.push({ segment: action.segment, kmh: action.kmh });
+    const [from, to] = [state.stations[action.segment], state.stations[action.segment + 1]];
+    event(state, `Ограничение скорости ${action.kmh} км/ч на перегоне ${from.id}–${to.id} (${from.name} — ${to.name}). Прогноз всех затронутых поездов пересчитан.`);
+    notifyPassengers(state);
+  } else if (action.type === 'unrestrict') {
+    assert(state.restrictions.some(r => r.segment === action.segment), 'Ограничения на этом перегоне нет');
+    state.restrictions = state.restrictions.filter(r => r.segment !== action.segment);
+    event(state, `Ограничение скорости на перегоне ${state.stations[action.segment].id}–${state.stations[action.segment + 1].id} снято.`);
+    notifyPassengers(state);
   } else {
     throw new Error('Неизвестное действие');
   }

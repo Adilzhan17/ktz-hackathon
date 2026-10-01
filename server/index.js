@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { createState, snapshot, act } from './model.js';
 
 let state = createState();
@@ -8,7 +9,9 @@ const clients = new Set();
 const publicRoot = new URL('../public/', import.meta.url);
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '127.0.0.1';
-const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const publicDir = fileURLToPath(publicRoot);
+const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.ico': 'image/x-icon' };
+const longCache = new Set(['.woff2', '.png']);
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
@@ -40,12 +43,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'Метод API не найден' });
     if (req.method !== 'GET') return json(res, 405, { error: 'Метод не поддерживается' });
-    const allowed = { '/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg', '/assets/ktz-emblem.png': 'assets/ktz-emblem.png', '/assets/ktz-wordmark.png': 'assets/ktz-wordmark.png' };
-    const file = allowed[url.pathname];
-    if (!file) return json(res, 404, { error: 'Страница не найдена' });
-    const ext = file.slice(file.lastIndexOf('.'));
-    const content = await readFile(fileURLToPath(new URL(file, publicRoot)));
-    res.writeHead(200, { 'Content-Type': `${mime[ext]}; charset=utf-8`, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+    if (url.pathname === '/healthz') return json(res, 200, { ok: true });
+    // Любой путь без расширения — клиентский маршрут (SPA), отдаём index.html.
+    let rel = decodeURIComponent(url.pathname);
+    if (!path.extname(rel)) rel = '/index.html';
+    const file = path.resolve(publicDir, '.' + rel);
+    if (!file.startsWith(publicDir)) return json(res, 404, { error: 'Страница не найдена' });
+    const ext = path.extname(file);
+    if (!mime[ext]) return json(res, 404, { error: 'Страница не найдена' });
+    let content;
+    try { content = await readFile(file); } catch { return json(res, 404, { error: 'Страница не найдена' }); }
+    res.writeHead(200, {
+      'Content-Type': `${mime[ext]}${ext === '.woff2' || ext === '.png' ? '' : '; charset=utf-8'}`,
+      'Cache-Control': longCache.has(ext) ? 'public, max-age=86400' : 'no-cache',
+      'X-Content-Type-Options': 'nosniff',
+    });
     res.end(content);
   } catch (error) {
     json(res, 400, { error: error instanceof SyntaxError ? 'Некорректный JSON' : error.message });

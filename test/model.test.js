@@ -116,17 +116,59 @@ test('reserve and admit never overfill a track or its cargo front', () => {
   }
 });
 
-test('closure changes forecast once and requires explicit plan confirmation', () => {
+test('closure produces conflicts and variants; plan needs explicit confirmation', () => {
   const state = createState();
   const before = snapshot(state).groups.find(g => g.id === 'D-G1').etaAt;
   assert.throws(() => act(state, { type: 'approve' }), /Нет нового/);
-  act(state, { type: 'block' });
+  const snap = act(state, { type: 'block' });
   assert.equal(state.planApproved, false);
-  assert.equal(snapshot(state).groups.find(g => g.id === 'D-G1').etaAt, before + 40 * 60_000);
+  assert.ok(snap.dispatch.conflicts.length > 0);
+  assert.equal(snap.dispatch.variants.length, 3);
+  assert.equal(snap.dispatch.variants.filter(v => v.recommended).length, 1);
+  assert.equal(snap.dispatch.selected, snap.dispatch.recommendedId);
+  assert.ok(snap.groups.find(g => g.id === 'D-G1').etaAt >= before);
   act(state, { type: 'approve' });
   assert.equal(state.planApproved, true);
+  assert.throws(() => act(state, { type: 'variant', variantId: 'fifo' }), /Нет варианта/);
   act(state, { type: 'block' });
   assert.equal(snapshot(state).groups.find(g => g.id === 'D-G1').etaAt, before);
+  assert.equal(state.planApproved, false);
+});
+
+test('every variant keeps opposite trains off the shared segment at the same time', () => {
+  const state = createState();
+  act(state, { type: 'block' });
+  for (const variant of snapshot(state).dispatch.variants) {
+    state.variant = variant.id;
+    const crossings = snapshot(state).trains.flatMap(t => {
+      for (let k = 1; k < t.forecast.length; k++) {
+        const [t0, i0] = t.forecast[k - 1], [t1, i1] = t.forecast[k];
+        if (i0 !== i1 && Math.min(i0, i1) === 3) return [{ dir: t.direction, enter: t0, exit: t1, n: t.number }];
+      }
+      return [];
+    });
+    for (const a of crossings) for (const b of crossings) {
+      if (a.dir === b.dir || a.n >= b.n) continue;
+      assert.ok(a.exit <= b.enter || b.exit <= a.enter, `${variant.id}: №${a.n} и №${b.n} на перегоне одновременно`);
+    }
+  }
+});
+
+test('speed restriction lengthens only trains crossing that segment and notifies passengers', () => {
+  const state = createState();
+  const base = snapshot(state);
+  assert.ok(base.trains.every(t => t.delay === 0));
+  const snap = act(state, { type: 'restrict', segment: 5, kmh: 25 });
+  const crossing = snap.trains.filter(t => t.route.some(([, i], k) => k && Math.min(i, t.route[k - 1][1]) === 5));
+  assert.ok(crossing.length > 0 && crossing.every(t => t.delay > 0));
+  assert.ok(snap.trains.filter(t => !crossing.includes(t)).every(t => t.delay === 0));
+  assert.ok(snap.notifications.length > 0 && snap.notifications.every(n => n.delay >= 5));
+  const lifted = act(state, { type: 'unrestrict', segment: 5 });
+  assert.ok(lifted.trains.every(t => t.delay === 0));
+  assert.ok(lifted.notifications[0].text.includes('восстановлено'));
+  for (const bad of [{ segment: 99, kmh: 25 }, { segment: 1, kmh: 5 }, { segment: 1, kmh: 80 }, { segment: 1.5, kmh: 40 }]) {
+    assert.throws(() => act(state, { type: 'restrict', ...bad }));
+  }
 });
 
 test('invalid requests do not change state', () => {
