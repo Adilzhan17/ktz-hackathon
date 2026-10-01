@@ -16,10 +16,12 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: "3000"
+      KTZ_STATE: /data/state.json
     ports:
       - "127.0.0.1:${KTZ_PORT:-8190}:3000"
     volumes:
       - ..:/repo:ro
+      - ${KTZ_DATA:-../data}:/data
     depends_on: [sync]
     restart: unless-stopped
 
