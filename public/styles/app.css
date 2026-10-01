@@ -329,3 +329,13 @@ a:hover .g-name { fill: var(--accent); text-decoration: underline; }
 .late-row[aria-pressed="true"] { background: var(--accent-bg); border-color: var(--accent-line); }
 .late-row span:nth-child(2) { color: var(--text-2); }
 @media (max-width: 880px) { .nav-badge { position: absolute; margin: 0; transform: translate(14px, -12px); } .nav a { position: relative; } }
+
+/* ===== Свёрнутое меню (больше места под схему) ===== */
+.shell.mini { --nav-w: 76px; }
+.shell.mini .brand span, .shell.mini .nav li a span, .shell.mini .nav-link span, .shell.mini .wordmark { display: none; }
+.shell.mini .brand { justify-content: center; padding: 18px 0; }
+.shell.mini .nav ul { padding: 0 10px; }
+.shell.mini .nav a:not(.brand), .shell.mini .nav-link { justify-content: center; padding: 12px 0; }
+.shell.mini .nav-badge { position: absolute; margin: 0; transform: translate(16px, -12px); }
+.shell.mini .nav a { position: relative; }
+@media (max-width: 880px) { .nav-collapse { display: none; } }

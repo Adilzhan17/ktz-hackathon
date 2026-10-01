@@ -219,3 +219,27 @@ test('closure leaves trains not crossing D–E unchanged', () => {
   act(state, { type: 'block' });
   assert.equal(groupView(state, group).etaAt, before);
 });
+
+test('clock: tick advances time, completes operations and stops at the end of the shift', async () => {
+  const { tick, endAt } = await import('../server/model.js');
+  const state = createState();
+  const start = state.now;
+  assert.equal(tick(state, 90), true); // на станции D окончилась обработка на пути 1
+  assert.equal(state.now, start + 90 * 60_000);
+  assert.equal(state.stations.find(s => s.id === 'D').tracks[0].processing, 0);
+  act(state, { type: 'clock', running: true, speed: 10 });
+  assert.equal(state.running, true);
+  assert.equal(state.speed, 10);
+  tick(state, 100_000);
+  assert.equal(state.now, endAt(state));
+  assert.equal(state.running, false);
+  assert.throws(() => act(state, { type: 'clock', running: true }), /Смена закончена/);
+  assert.equal(snapshot(state).ended, true);
+});
+
+test('clock: invalid speed or flag is rejected without changing state', () => {
+  const state = createState();
+  const before = JSON.stringify(state);
+  for (const bad of [{ speed: 7 }, { speed: 'fast' }, { running: 'yes' }]) assert.throws(() => act(state, { type: 'clock', ...bad }));
+  assert.equal(JSON.stringify(state), before);
+});
