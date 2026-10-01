@@ -1,6 +1,8 @@
 import { h } from 'preact';
 import htm from 'htm';
-import { iconMarkup } from './icons.js';
+import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
+import { createMorph, canonicalD } from 'morphicons/dom';
+import { icons } from './icons.js';
 
 export const html = htm.bind(h);
 
@@ -42,10 +44,30 @@ export const PRIORITY = {
 };
 export const DIRECTION = { even: 'Чётное', odd: 'Нечётное' };
 
-export function Icon({ name, size = 18, class: cls = '', label }) {
+const dCache = new Map();
+const iconData = name => icons[name] || icons['circle-alert'];
+const staticD = name => {
+  if (!dCache.has(name)) dCache.set(name, canonicalD(iconData(name)));
+  return dCache.get(name);
+};
+
+/** Иконка Lucide. При смене name плавно перетекает в новую (morphicons, пружинная анимация). */
+export function Icon({ name, size = 18, class: cls = '', label, spring = 'snappy' }) {
+  const path = useRef(null);
+  const morph = useRef(null);
+  const shown = useRef(name);
+  useLayoutEffect(() => { path.current.setAttribute('d', staticD(shown.current)); }, []);
+  useEffect(() => {
+    if (shown.current === name) return;
+    const from = shown.current;
+    shown.current = name;
+    if (!morph.current) morph.current = createMorph(path.current, iconData(from), { reducedMotion: 'user' });
+    morph.current.morphTo(iconData(name), spring);
+  }, [name]);
+  useEffect(() => () => morph.current?.destroy(), []);
   return html`<svg class=${`icon ${cls}`} width=${size} height=${size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden=${label ? 'false' : 'true'} role=${label ? 'img' : undefined}
-    aria-label=${label} dangerouslySetInnerHTML=${{ __html: iconMarkup(name) }}></svg>`;
+    stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden=${label ? 'false' : 'true'}
+    role=${label ? 'img' : undefined} aria-label=${label}><path ref=${path} /></svg>`;
 }
 
 export function downloadCsv(filename, rows) {

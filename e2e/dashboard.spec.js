@@ -4,40 +4,55 @@ test.beforeEach(async ({ request }) => {
   await request.post('/api/action', { data: { type: 'reset' } });
 });
 
-test('overview shows operational KPIs and the Gantt chart', async ({ page }) => {
+test('overview shows KPIs, the Gantt chart and the attention card', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Оперативная обстановка' })).toBeVisible();
-  await expect(page.getByText('Движение по графику')).toBeVisible();
+  await expect(page.getByText('Движение по графику').first()).toBeVisible();
   await expect(page.getByRole('img', { name: /График движения: 30 поездов/ })).toBeVisible();
-  await expect(page.getByText('Конфликтов нет')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Требует решения' })).toBeVisible();
+  await expect(page.getByText('Опозданий нет')).toBeVisible();
 });
 
 test('closure: conflicts, three variants, choosing and confirming a plan notifies passengers', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/#/decisions');
   await page.getByRole('button', { name: /Закрыть перегон D–E/ }).click();
-  await expect(page.getByText('Закрыт нечётный путь D–E')).toBeVisible();
+  await expect(page.locator('.incident-line')).toContainText('Закрыт нечётный путь перегона D–E');
   const variants = page.getByRole('radiogroup', { name: 'Варианты пропуска поездов' }).locator('label.variant');
   await expect(variants).toHaveCount(3);
   await expect(variants.first()).toContainText('Рекомендуется');
   await variants.nth(2).click();
   await expect(variants.nth(2)).toHaveClass(/on/);
-  await expect(page.getByText('Уведомления пассажирам')).toBeVisible();
   await expect(page.locator('.notices li')).toHaveCount(0);       // до подтверждения пассажиров не тревожим
-  await page.getByRole('button', { name: 'Подтвердить вариант' }).click();
+  await page.getByRole('button', { name: /Подтвердить вариант/ }).click();
   await expect(page.getByText('План подтверждён')).toBeVisible();
   await expect(page.locator('.notices li').first()).toContainText('опоздание');
+  // на главной появилась карточка и бейдж в меню
+  await page.getByRole('link', { name: 'Обстановка' }).click();
+  await expect(page.getByText('План подтверждён:')).toBeVisible();
+  await page.goto('/#/decisions');
   await page.getByRole('button', { name: 'Снять закрытие' }).click();
   await expect(page.getByText('Конфликтов нет')).toBeVisible();
 });
 
-test('speed restriction is entered and lifted, delays appear in KPIs', async ({ page }) => {
+test('attention badge appears in the menu while a closure awaits a decision', async ({ page }) => {
+  await page.goto('/#/decisions');
+  await page.getByRole('button', { name: /Закрыть перегон D–E/ }).click();
+  await expect(page.locator('.nav-badge')).toBeVisible();
   await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Перейти к решению' })).toBeVisible();
+});
+
+test('speed restriction is entered and lifted, delays appear in KPIs', async ({ page }) => {
+  await page.goto('/#/decisions');
   await page.getByLabel('Перегон').selectOption('4');
   await page.getByLabel('Скорость, км/ч').selectOption('25');
   await page.getByRole('button', { name: 'Ввести', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Ограничения скорости' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Действующие ограничения' })).toBeVisible();
+  await page.getByRole('link', { name: 'Обстановка' }).click();
   await expect(page.locator('.kpi', { hasText: 'Задержано поездов' })).not.toContainText('задержек нет');
+  await page.goto('/#/decisions');
   await page.getByRole('button', { name: 'Снять', exact: true }).click();
+  await page.getByRole('link', { name: 'Обстановка' }).click();
   await expect(page.locator('.kpi', { hasText: 'Задержано поездов' })).toContainText('задержек нет');
 });
 
@@ -111,7 +126,7 @@ test('two tabs stay in sync', async ({ browser }) => {
 
 test('phone layout: no horizontal overflow, bottom navigation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  for (const path of ['/', '/#/trains', '/#/station/D', '/#/log']) {
+  for (const path of ['/', '/#/decisions', '/#/trains', '/#/station/D', '/#/log', '/#/how']) {
     await page.goto(path);
     await page.waitForSelector('main h1');
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -119,4 +134,45 @@ test('phone layout: no horizontal overflow, bottom navigation', async ({ page })
   }
   const nav = await page.locator('.nav').boundingBox();
   expect(nav.y).toBeGreaterThan(700);
+});
+
+test('how-it-works page: animated demos, stepper, cases, sandbox does not touch the shared shift', async ({ page, request }) => {
+  await page.goto('/#/how');
+  await expect(page.getByRole('heading', { name: 'Как это работает', level: 1 })).toBeVisible();
+  // проблема: плеер переключает фазы
+  const demo = page.locator('.problem');
+  await expect(demo.locator('.demo-caption h3')).toHaveText('Всё идёт по графику');
+  await demo.getByRole('button', { name: 'Следующий шаг' }).click();
+  await expect(demo.locator('.demo-caption h3')).toHaveText('Сход на перегоне');
+  // факторы
+  await expect(page.locator('.factor')).toHaveCount(6);
+  // алгоритм: реальный движок в браузере
+  const stepper = page.locator('.stepper');
+  await stepper.locator('.steps').getByRole('button', { name: /Находим конфликты/ }).click();
+  await expect(stepper.locator('.stage-text')).toContainText('конфликт');
+  await expect(stepper.locator('svg.lanes')).toBeVisible();
+  await stepper.locator('.steps').getByRole('button', { name: /Строим варианты/ }).click();
+  await expect(stepper.locator('.mini-variants figure')).toHaveCount(3);
+  await stepper.locator('.steps').getByRole('button', { name: /Пассажиры узнают/ }).click();
+  await expect(stepper.locator('.push').first()).toContainText('Поезд');
+  // случаи
+  await page.getByRole('tab', { name: 'Окно и ограничение скорости' }).click();
+  await expect(page.locator('.flow')).toContainText('25 км/ч');
+  // песочница
+  const sb = page.locator('.sandbox');
+  await sb.getByRole('button', { name: /Закрыть перегон D–E/ }).click();
+  await expect(sb.locator('.sandbox-kpis span').first()).not.toHaveText(/^0 /);
+  await sb.getByRole('button', { name: 'Подтвердить' }).click();
+  await expect(sb.locator('.sandbox-kpis')).toContainText('уведомлений пассажирам');
+  expect((await (await request.get('/api/state')).json()).blocked).toBe(false);
+});
+
+test('icons morph: sort chevron changes its path when direction flips', async ({ page }) => {
+  await page.goto('/#/trains');
+  const th = page.getByRole('columnheader', { name: /Опоздание/ });
+  const d = () => th.locator('svg path').getAttribute('d');
+  const before = await d();
+  await th.getByRole('button').click();
+  await page.waitForTimeout(900);
+  expect(await d()).not.toBe(before);
 });

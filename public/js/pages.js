@@ -3,7 +3,7 @@ import { html, Icon, count, delayText, clockAt, duration, PRIORITY, DIRECTION, d
 import { app, go, href, updateUi } from './store.js';
 import { Button, Badge, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { Gantt } from './gantt.js';
-import { DecisionPanel, PassengerNotices } from './decisions.js';
+import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
 
 const stationName = (data, i) => data.stations[i].name;
 
@@ -33,23 +33,32 @@ export function Overview({ data }) {
           <small>Сплошная линия — прогноз, пунктир — нитка по графику. Нажмите на линию, чтобы выделить поезд.</small></div></div>
         <${Gantt} data=${data} />
       </section>
-      <aside class="aside" aria-label="Решения и уведомления">
-        <${DecisionPanel} data=${data} />
+      <aside class="aside" aria-label="Что требует внимания">
+        <${AttentionCard} data=${data} />
+        <${LateList} data=${data} />
+      </aside>
+    </div>`;
+}
+
+export function DecisionsPage({ data }) {
+  const incident = data.blocked;
+  const first = data.dispatch.conflicts.length ? Math.min(...data.dispatch.conflicts.map(c => Math.min(c.a.enter, c.b.enter))) : null;
+  const start = first === null ? 0 : Math.max(0, Math.floor((first - 30) / 30) * 30);
+  return html`<${PageHeader} title="Решения диспетчера"
+      subtitle="Введите событие, сравните варианты пропуска и подтвердите лучший. Решение остаётся за диспетчером." />
+    <div class="grid-main">
+      <div class="stack">
+        ${incident ? html`<${IncidentPanel} data=${data} />` : html`<section class="panel"><${Empty} icon="circle-check" title="Конфликтов нет">Движение идёт по графику. Введите событие справа, и система рассчитает варианты пропуска.</${Empty}></section>`}
+        <section class="panel" aria-labelledby="prev-title">
+          <div class="panel-head"><div><h2 id="prev-title">Прогноз для выбранного варианта</h2><small>Окно 4 часа вокруг закрытого перегона. Красный отрезок — ожидание на станции.</small></div><a href=${href('/')}>Открыть полный ГИД</a></div>
+          <${Gantt} data=${data} zoom=${4} start=${start} compact />
+        </section>
+      </div>
+      <aside class="aside" aria-label="События и уведомления">
+        <${Scenarios} data=${data} />
         <${PassengerNotices} data=${data} />
       </aside>
-    </div>
-    <section class="panel" aria-labelledby="st-title">
-      <div class="panel-head"><h2 id="st-title">Станции</h2><a href=${href('/stations')}>Все станции</a></div>
-      <div class="station-strip">
-        ${data.stations.map(s => {
-          const load = Math.round(s.occupied / s.capacity * 100);
-          return html`<a key=${s.id} class="station-chip" href=${href(`/station/${s.id}`)}>
-            <span class="code">${s.id}</span><strong>${s.name}</strong>
-            <span class="meter" role="img" aria-label=${`Занятость ${load}%`}><i style=${`width:${load}%`}></i></span>
-            <small>${load}% · ${s.available} мест</small></a>`;
-        })}
-      </div>
-    </section>`;
+    </div>`;
 }
 
 const SORTS = {

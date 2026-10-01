@@ -25,8 +25,8 @@ function useWidth(ref) {
   return w;
 }
 
-export function Gantt({ data }) {
-  const { ui } = app;
+export function Gantt({ data, compact = false, zoom: forcedZoom, start: forcedStart }) {
+  const ui = { ...app.ui, ...(forcedZoom ? { zoom: forcedZoom } : {}), ...(forcedStart != null ? { windowStart: forcedStart } : {}) };
   const wrap = useRef(null);
   const width = useWidth(wrap);
   const [hover, setHover] = useState(null);
@@ -63,7 +63,7 @@ export function Gantt({ data }) {
   const tipLeft = hover ? Math.min(hover.x + 14, width - 250) : 0;
 
   return html`<div class="gantt">
-    <div class="gantt-controls">
+    ${!compact && html`<div class="gantt-controls">
       <${Segmented} label="Масштаб времени" value=${ui.zoom} options=${ZOOMS} onChange=${v => updateUi({ zoom: v })} />
       <div class="btn-group" role="group" aria-label="Сдвиг окна времени">
         <${Button} variant="secondary" size="sm" icon="chevron-left" label="Раньше" onClick=${() => shift(-1)} disabled=${start <= 0} reason="Это начало смены" />
@@ -71,7 +71,7 @@ export function Gantt({ data }) {
         <${Button} variant="secondary" size="sm" icon="locate-fixed" onClick=${() => updateUi({ windowStart: null })}>Сейчас</${Button}>
       </div>
       <${Segmented} label="Категория поездов" value=${ui.category} options=${CATS} onChange=${v => updateUi({ category: v })} />
-    </div>
+    </div>`}
     ${sel && html`<div class="selection" role="status">
       <span class="swatch" style=${`background:${style[sel.priority].stroke}`}></span>
       <strong>№${sel.number}</strong><span>${sel.label}</span>

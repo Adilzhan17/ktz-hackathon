@@ -8,7 +8,7 @@ export function Button({ variant = 'secondary', size = 'md', icon, iconRight, ch
   const handle = e => { if (off) { e.preventDefault(); return; } onClick?.(e); };
   return html`<button type="button" class=${`btn btn-${variant} btn-${size} ${cls}`} aria-disabled=${off ? 'true' : undefined}
     title=${disabled && reason ? reason : rest.title} aria-label=${label} onClick=${handle} ...${rest}>
-    ${icon && html`<${Icon} name=${icon} size=${size === 'sm' ? 15 : 17} />`}
+    ${(icon || pending) && html`<${Icon} name=${pending ? 'loader-circle' : icon} size=${size === 'sm' ? 15 : 17} class=${pending ? 'spin' : ''} />`}
     ${children != null && html`<span>${children}</span>`}
     ${iconRight && html`<${Icon} name=${iconRight} size=${size === 'sm' ? 15 : 17} />`}
     ${disabled && reason && html`<span class="sr-only">. ${reason}</span>`}

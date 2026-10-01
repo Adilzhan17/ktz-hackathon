@@ -3,26 +3,29 @@ import { useEffect, useState } from 'preact/hooks';
 import { html, Icon, time, dateLong } from './lib.js';
 import { app, useApp, connect, act, href } from './store.js';
 import { Button, Dialog, Toasts } from './ui.js';
-import { Overview, Trains, Stations } from './pages.js';
+import { Overview, DecisionsPage, Trains, Stations } from './pages.js';
+import { HowPage } from './how.js';
 import { StationPage } from './station.js';
 import { LogPage } from './log.js';
 
 const NAV = [
   { page: 'overview', path: '/', label: 'Обстановка', icon: 'chart-gantt' },
+  { page: 'decisions', path: '/decisions', label: 'Решения', icon: 'scale' },
   { page: 'trains', path: '/trains', label: 'Поезда', icon: 'train-front' },
   { page: 'stations', path: '/stations', label: 'Станции', icon: 'building-2', also: ['station'] },
   { page: 'log', path: '/log', label: 'Журнал', icon: 'list-checks' },
+  { page: 'how', path: '/how', label: 'Как это работает', icon: 'book-open' },
 ];
-const TITLES = { overview: 'Обстановка', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал' };
+const TITLES = { overview: 'Обстановка', decisions: 'Решения', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
-function Nav({ page, onAbout }) {
+function Nav({ page, onAbout, attention }) {
   return html`<nav class="nav" aria-label="Основное меню">
     <a class="brand" href=${href('/')} aria-label="Автодиспетчер — на главную">
       <img src="/assets/ktz-emblem.png" alt="" width="40" height="40" />
       <span><strong>Автодиспетчер</strong><small>Поездной диспетчер · ГИД</small></span>
     </a>
     <ul>${NAV.map(n => html`<li key=${n.page}><a href=${href(n.path)} class=${page === n.page || n.also?.includes(page) ? 'on' : ''}
-      aria-current=${page === n.page || n.also?.includes(page) ? 'page' : undefined}><${Icon} name=${n.icon} size=${19} /><span>${n.label}</span></a></li>`)}</ul>
+      aria-current=${page === n.page || n.also?.includes(page) ? 'page' : undefined}><${Icon} name=${n.icon} size=${19} /><span>${n.label}</span>${n.page === 'decisions' && attention > 0 && html`<b class="nav-badge" aria-label=${`Требует решения: ${attention}`}>${attention}</b>`}</a></li>`)}</ul>
     <div class="nav-foot">
       <img class="wordmark" src="/assets/ktz-wordmark.png" alt="Қазақстан темір жолы" />
       <button type="button" class="nav-link" onClick=${onAbout}><${Icon} name="info" size=${18} /><span>О системе</span></button>
@@ -41,7 +44,7 @@ function Topbar({ data, onReset }) {
     <div class="btn-group" role="group" aria-label="Продвинуть время модели">
       ${[[15, '+15 мин'], [30, '+30 мин'], [60, '+1 час']].map(([m, l]) => html`<${Button} key=${m} size="sm" variant="secondary" disabled=${dis} reason=${app.online ? 'Выполняется действие' : 'Нет соединения с сервером'} onClick=${() => step(m)}>${l}</${Button}>`)}
     </div>
-    <span class=${`conn ${app.online ? 'ok' : 'off'}`} role="status"><i></i>${app.online ? 'На связи' : 'Нет связи'}</span>
+    <span class=${`conn ${app.online ? 'ok' : 'off'}`} role="status"><${Icon} name=${app.online ? 'wifi' : 'wifi-off'} size=${16} />${app.online ? 'На связи' : 'Нет связи'}</span>
     <${Button} variant="ghost" size="sm" icon="rotate-ccw" label="Начать смену заново" title="Начать смену заново" onClick=${onReset} />
   </header>`;
 }
@@ -56,13 +59,15 @@ function App() {
   }
   const page = {
     overview: html`<${Overview} data=${data} />`,
+    decisions: html`<${DecisionsPage} data=${data} />`,
+    how: html`<${HowPage} />`,
     trains: html`<${Trains} data=${data} />`,
     stations: html`<${Stations} data=${data} />`,
     station: html`<${StationPage} data=${data} params=${route.params} />`,
     log: html`<${LogPage} data=${data} />`,
   }[route.page];
   return html`<div class="shell">
-    <${Nav} page=${route.page} onAbout=${() => setDialog('about')} />
+    <${Nav} page=${route.page} onAbout=${() => setDialog('about')} attention=${data.blocked && !data.planApproved ? data.dispatch.conflicts.length : 0} />
     <div class="workspace">
       <${Topbar} data=${data} onReset=${() => setDialog('reset')} />
       ${!app.online && html`<div class="offline" role="alert"><${Icon} name="wifi-off" size=${18} /> Нет соединения с сервером. Действия временно недоступны — подключаемся заново…</div>`}
