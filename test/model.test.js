@@ -11,7 +11,7 @@ const eligibleGroup = sn => sn.groups.find(g => g.eligible && g.status === 'appr
 test('scenario: ten stations, a rolling timetable with unique numbers and a group per freight train', () => {
   const sn = snapshot(quiet());
   assert.equal(sn.stations.length, 10);
-  assert.ok(sn.trains.length >= 40 && sn.trains.length <= 120, `поездов ${sn.trains.length}`);
+  assert.ok(sn.trains.length > 0 && sn.trains.length <= 25, `поездов ${sn.trains.length}`);
   assert.equal(new Set(sn.trains.map(t => t.number)).size, sn.trains.length);
   assert.ok(onLine(sn).length >= 6, 'на линии есть поезда');
   assert.ok(sn.stations.every(s => s.tracks.length >= 2 && s.tracks.length <= 3));
@@ -57,7 +57,7 @@ test('timetable is continuous: three days pass with no gap, no duplicates and bo
     advanceTime(state, 60);
     const numbers = state.trains.map(t => t.number);
     assert.equal(new Set(numbers).size, numbers.length, `дубликаты в час ${h}`);
-    assert.ok(state.trains.length >= 40 && state.trains.length <= 130, `размер ${state.trains.length}`);
+    assert.ok(state.trains.length > 0 && state.trains.length <= 25, `размер ${state.trains.length}`);
     for (const t of state.trains) seen.add(t.uid);
   }
   assert.ok(seen.size > state.trains.length * 2, 'появлялись новые поезда');

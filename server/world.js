@@ -7,7 +7,9 @@ export const TZ_OFFSET = 300; // Asia/Almaty, минут от UTC
 export const DAY = 1440;
 const minute = 60_000;
 const hour = 3_600_000;
-const HORIZON = 14 * 60; // поезда создаются за 14 часов до отправления
+// В интерфейсе держим только ближайшие рейсы: диспетчеру не нужна вся смена сразу.
+const HORIZON = 150; // поезда создаются за 2,5 часа до отправления
+const MAX_VISIBLE_TRAINS = 25;
 
 /** Начало суток (локальных) для момента ms. */
 export const dayStart = ms => Math.floor((ms + TZ_OFFSET * minute) / 86_400_000) * 86_400_000 - TZ_OFFSET * minute;
@@ -168,23 +170,41 @@ function makeGroup(state, train) {
 export function ensureTrains(state) {
   const t = nowMinutes(state);
   const day = Math.floor(t / DAY);
-  const have = new Set(state.trains.map(x => x.uid));
   let changed = false;
   // Одна группа вагонов на рейс: защита от дублей (в том числе в старом сохранённом состоянии).
   const uniq = new Set();
   const groups = state.groups.filter(g => { if (g.status !== 'approaching') return true; if (uniq.has(g.uid)) return false; uniq.add(g.uid); return true; });
   if (groups.length !== state.groups.length) state.groups = groups;
+  // После перезапуска старое сохранение может содержать прежнее широкое окно рейсов.
+  // Сохраняем идущие поезда и ближайшие отправления, чтобы список не превышал лимит.
+  if (state.trains.length > MAX_VISIBLE_TRAINS) {
+    const relevance = train => {
+      const start = train.route[0][0];
+      const end = train.route.at(-1)[0];
+      if (end < t) return 1_000_000 + t - end;
+      if (start <= t) return train.priority;
+      return 10_000 + start - t + train.priority;
+    };
+    const keep = new Set([...state.trains]
+      .sort((a, b) => relevance(a) - relevance(b))
+      .slice(0, MAX_VISIBLE_TRAINS)
+      .map(train => train.uid));
+    for (const train of [...state.trains]) if (!keep.has(train.uid)) removeTrain(state, train);
+    changed = true;
+  }
+  const have = new Set(state.trains.map(x => x.uid));
   for (let d = day - 1; d <= day + 1; d++) {
     for (const tpl of TEMPLATES) {
       const uid = `${tpl.id}@${d}`;
       if (have.has(uid) || uid in state.seen) continue;
+      if (state.trains.length >= MAX_VISIBLE_TRAINS) continue;
       const dep = d * DAY + tpl.dep;
-      if (dep > t + HORIZON || dep + 720 < t - 120) continue;
+      if (dep > t + HORIZON || dep + 720 < t - 60) continue;
       if (state.trains.some(x => x.number === tpl.id && x.uid !== uid && x.route[0][0] > dep)) continue; // более новый уже есть
       // предыдущий поезд с этим номером должен быть снят
       for (const old of state.trains.filter(x => x.number === tpl.id)) removeTrain(state, old);
       const train = instantiate(state, tpl, d);
-      if (train.route.at(-1)[0] < t - 180) { state.seen[uid] = d; continue; } // уже давно прибыл
+      if (train.route.at(-1)[0] < t - 60) { state.seen[uid] = d; continue; } // уже давно прибыл
       state.trains.push(train);
       state.seen[uid] = d;
       if (train.cargo) state.groups.push(makeGroup(state, train));
@@ -195,7 +215,7 @@ export function ensureTrains(state) {
   for (const uid of Object.keys(state.seen)) if (state.seen[uid] < day - 3) delete state.seen[uid];
   // убираем прибывшие
   const plan = getPlan(state);
-  const gone = state.trains.filter(tr => plan.byTrain[tr.number].forecast.at(-1)[0] + 90 < t);
+  const gone = state.trains.filter(tr => plan.byTrain[tr.number].forecast.at(-1)[0] + 30 < t);
   for (const tr of gone) removeTrain(state, tr);
   if (gone.length) { touchPlan(state); changed = true; }
   return changed;
