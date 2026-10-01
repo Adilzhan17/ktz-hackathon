@@ -459,3 +459,14 @@ test('station cards and map agree on occupied wagons and the arrival queue', asy
   const after = (await getState(request)).stations.find(x => x.id === st.id);
   await expect(station.locator('.m-load')).toHaveText(`${after.occupied} / ${after.capacity} ваг.`);
 });
+
+test('automation settings can be changed from the interface', async ({ page, request }) => {
+  await page.goto('/#/decisions');
+  const group = page.getByRole('radiogroup', { name: 'Интенсивность случайных событий' });
+  await group.getByRole('radio', { name: 'Частые' }).click();
+  await expect.poll(async () => (await getState(request)).auto.intensity).toBe('high');
+  await page.getByLabel('Автопилот: применять рекомендацию через 15 мин').click();
+  await expect.poll(async () => (await getState(request)).auto.approve).toBe(true);
+  await page.getByLabel('Станции работают сами').click();
+  await expect.poll(async () => (await getState(request)).auto.stations).toBe(false);
+});

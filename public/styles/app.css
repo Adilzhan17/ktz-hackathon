@@ -513,3 +513,7 @@ kbd { font:500 11px var(--font); padding:3px 6px; border:1px solid var(--line); 
 @media (max-width: 560px) { .levels { grid-template-columns: 1fr 1fr; } }
 
 .kpis { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+
+.checks { display: grid; gap: 6px; }
+.check { display: flex !important; flex-direction: row !important; align-items: center; gap: 8px; color: var(--text-2); font-weight: 500; }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); }

@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { html, Icon, count, delayText, clockAt, time, duration } from './lib.js';
 import { app, act, updateUi, go, href } from './store.js';
-import { Button, Badge, Empty } from './ui.js';
+import { Button, Badge, Empty, Segmented } from './ui.js';
 
 const SPEEDS = [25, 40, 60];
 
@@ -88,6 +88,18 @@ export function Scenarios({ data, bare = false }) {
   const incidents = data.incidents;
   return html`<${Wrap} class=${bare ? 'events-bare' : 'panel'} aria-labelledby=${bare ? undefined : 'ev-title'}>
     ${!bare && html`<div class="panel-head"><h2 id="ev-title">События на участке</h2><${Icon} name="construction" size=${18} /></div>`}
+    <div class="event-card col automation">
+      <div><h3>Автоматика</h3><p class="muted">Данные создаются сами: поломки, плановые окна и ограничения скорости случаются случайно, станции принимают вагоны, автопилот применяет рекомендацию.</p></div>
+      <div class="field-row">
+        <label>События
+          <${Segmented} label="Интенсивность случайных событий" value=${data.auto.intensity} onChange=${v => act({ type: 'auto', intensity: v })}
+            options=${[{ value: 'off', label: 'Выкл' }, { value: 'low', label: 'Редкие' }, { value: 'normal', label: 'Обычные' }, { value: 'high', label: 'Частые' }]} /></label>
+      </div>
+      <div class="field-row checks">
+        <label class="check"><input type="checkbox" checked=${data.auto.stations} onChange=${e => act({ type: 'auto', stations: e.target.checked })} /> Станции работают сами</label>
+        <label class="check"><input type="checkbox" checked=${data.auto.approve} onChange=${e => act({ type: 'auto', approve: e.target.checked })} /> Автопилот: применять рекомендацию через 15 мин</label>
+      </div>
+    </div>
     <div class="event-card col">
       <div><h3>Закрыть путь на перегоне</h3><p class="muted">Сход, ремонт, авария. Поезда закрытого пути пойдут по соседнему, система предложит варианты пропуска.</p></div>
       <div class="field-row">
