@@ -1,0 +1,39 @@
+# Деплой ktz.perricheno.com. Код проекта не затрагивается: репозиторий монтируется как есть,
+# обновления приходят через git pull (sync), сервер перезапускается сам (node --watch).
+name: ktz
+services:
+  app:
+    image: node:22-alpine
+    working_dir: /repo
+    command: node --watch server/index.js
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:${KTZ_PORT:-8190}:3000"
+    volumes:
+      - ..:/repo:ro
+    restart: unless-stopped
+
+  sync:
+    image: alpine/git:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        git config --global --add safe.directory /repo
+        # read-only helper: файл с токеном смонтирован ro, store-helper пытался в него писать
+        git config --global credential.helper '!f() { [ "$$1" = get ] && sed -n "s#^https://\\([^:]*\\):\\([^@]*\\)@github.com.*#username=\\1\\npassword=\\2#p" /run/git-credentials | head -2; }; f'
+        while true; do
+          before=$$(git -C /repo rev-parse HEAD)
+          if git -C /repo pull --ff-only -q; then
+            after=$$(git -C /repo rev-parse HEAD)
+            [ "$$before" != "$$after" ] && echo "$$(date -Iseconds) деплой: $$before -> $$after"
+          else
+            echo "$$(date -Iseconds) pull failed (локальные изменения/расхождение?)"
+          fi
+          sleep "$${SYNC_INTERVAL:-15}"
+        done
+    volumes:
+      - ..:/repo
+      - ${GIT_CREDENTIALS:-/root/.git-credentials}:/run/git-credentials:ro
+    restart: unless-stopped
