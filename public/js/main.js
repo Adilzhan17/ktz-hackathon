@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, Icon, time, dateLong } from './lib.js';
 import { app, useApp, connect, act, href, useLiveNow, clock } from './store.js';
 import { Button, Dialog, Toasts } from './ui.js';
@@ -7,6 +7,7 @@ import { Overview, DecisionsPage, Trains, Stations } from './pages.js';
 import { HowPage } from './how.js';
 import { StationPage } from './station.js';
 import { LogPage } from './log.js';
+import { QuickSearch } from './search.js';
 
 const NAV = [
   { page: 'overview', path: '/', label: 'Обстановка', icon: 'chart-gantt' },
@@ -19,6 +20,14 @@ const NAV = [
 const TITLES = { overview: 'Обстановка', decisions: 'Решения', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
 function Nav({ page, onAbout, attention, mini, onMini }) {
+  const more = useRef(null);
+  useEffect(() => { if (more.current) more.current.open = false; }, [page]);
+  useEffect(() => {
+    const close = e => { if (more.current && (!more.current.contains(e.target) || e.key === 'Escape')) more.current.open = false; };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
+  }, []);
   return html`<nav class="nav" aria-label="Основное меню">
     <a class="brand" href=${href('/')} aria-label="Автодиспетчер — на главную">
       <img src="/assets/ktz-emblem.png" alt="" width="40" height="40" />
@@ -26,6 +35,7 @@ function Nav({ page, onAbout, attention, mini, onMini }) {
     </a>
     <ul>${NAV.map(n => html`<li key=${n.page}><a href=${href(n.path)} title=${n.label} class=${page === n.page || n.also?.includes(page) ? 'on' : ''}
       aria-current=${page === n.page || n.also?.includes(page) ? 'page' : undefined}><${Icon} name=${n.icon} size=${19} /><span>${n.label}</span>${n.page === 'decisions' && attention > 0 && html`<b class="nav-badge" aria-label=${`Требует решения: ${attention}`}>${attention}</b>`}</a></li>`)}</ul>
+    <details class="mobile-more" ref=${more}><summary><${Icon} name="menu" size=${19} /><span>Ещё</span></summary><div class="more-links"><a href=${href('/log')}><${Icon} name="list-checks" size=${18} />Журнал</a><a href=${href('/how')}><${Icon} name="book-open" size=${18} />Как это работает</a><button type="button" onClick=${() => { more.current.open = false; onAbout(); }}><${Icon} name="info" size=${18} />О системе</button></div></details>
     <div class="nav-foot">
       <img class="wordmark" src="/assets/ktz-wordmark.png" alt="Қазақстан темір жолы" />
       <button type="button" class="nav-link" onClick=${onAbout} title="О системе"><${Icon} name="info" size=${18} /><span>О системе</span></button>
@@ -34,11 +44,12 @@ function Nav({ page, onAbout, attention, mini, onMini }) {
   </nav>`;
 }
 
-function Topbar({ data, onReset }) {
+function Topbar({ data, onReset, onSearch }) {
   const dis = !app.online || app.busy;
   const liveMs = useLiveNow(1);
   const step = m => act({ type: 'advance', minutes: m });
   return html`<header class="topbar">
+    <button class="global-search" type="button" onClick=${onSearch} aria-label="Поиск поездов и станций"><${Icon} name="search" size=${17} /><span>Поезд или станция</span><kbd>⌘ / Ctrl K</kbd></button>
     <div class="clock" aria-label="Время модели">
       <${Icon} name="clock" size=${18} />
       <div><strong class="num">${time(liveMs)}</strong><small>${dateLong(liveMs)} · ${clock.running ? `идёт, ×${data.speed} мин/с` : 'на паузе'}</small></div>
@@ -55,6 +66,11 @@ function App() {
   useApp();
   const { data, route } = app;
   const [dialog, setDialog] = useState(null);
+  useEffect(() => {
+    const shortcut = e => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setDialog(d => d === 'search' ? null : 'search'); } };
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, []);
   const [mini, setMini] = useState(() => localStorage.getItem('navMini') === '1');
   const toggleMini = () => setMini(m => { localStorage.setItem('navMini', m ? '0' : '1'); return !m; });
   useEffect(() => { document.title = `${TITLES[route.page] || 'Автодиспетчер'} — Автодиспетчер КТЖ`; }, [route.page]);
@@ -73,17 +89,18 @@ function App() {
   return html`<div class=${`shell ${mini ? 'mini' : ''}`}>
     <${Nav} mini=${mini} onMini=${toggleMini} page=${route.page} onAbout=${() => setDialog('about')} attention=${data.blocked && !data.planApproved ? data.dispatch.conflicts.length : 0} />
     <div class="workspace">
-      <${Topbar} data=${data} onReset=${() => setDialog('reset')} />
+      <${Topbar} data=${data} onReset=${() => setDialog('reset')} onSearch=${() => setDialog('search')} />
       ${!app.online && html`<div class="offline" role="alert"><${Icon} name="wifi-off" size=${18} /> Нет соединения с сервером. Действия временно недоступны — подключаемся заново…</div>`}
       <main id="main" tabindex="-1">${page}</main>
       <footer class="foot"><span>Помощник диспетчера. Решение принимает поездной диспетчер.</span><span>Учебная модель: данные условные, система не заменяет СЦБ и сертифицированные системы безопасности.</span></footer>
     </div>
     <${Toasts} />
-    <${Dialog} open=${dialog === 'reset'} onClose=${() => setDialog(null)} title="Начать смену заново?"
+    <${QuickSearch} data=${data} open=${dialog === 'search'} onClose=${() => setDialog(null)} />
+    <${Dialog} id="reset" open=${dialog === 'reset'} onClose=${() => setDialog(null)} title="Начать смену заново?"
       actions=${html`<${Button} onClick=${() => setDialog(null)}>Отмена</${Button}><${Button} variant="danger" onClick=${async () => { setDialog(null); await act({ type: 'reset' }); }}>Сбросить смену</${Button}>`}>
       <p>Все операции, резервы, ограничения и события будут сброшены. Это общее состояние для всех, кто открыл систему.</p>
     </${Dialog}>
-    <${Dialog} open=${dialog === 'about'} onClose=${() => setDialog(null)} title="О системе">
+    <${Dialog} id="about" open=${dialog === 'about'} onClose=${() => setDialog(null)} title="О системе">
       <p>Автодиспетчер помогает поездному диспетчеру в нестандартных ситуациях: закрытие пути после схода, движение по неправильному пути, ограничения скорости после ремонта.</p>
       <p>Система находит конфликты встречных поездов, считает несколько вариантов пропуска с учётом приоритетов, предлагает лучший и пересчитывает прогноз после подтверждения. Об опоздании пассажирских поездов она сообщает пассажирам.</p>
       <p><strong>Границы.</strong> Все данные условные. Интервальное регулирование, стрелочные маршруты и сигналы не моделируются; решение остаётся за диспетчером.</p>

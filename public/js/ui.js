@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
 import { html, Icon } from './lib.js';
 import { app, dismissToast } from './store.js';
 
@@ -52,17 +52,17 @@ export function Tabs({ value, tabs, onChange, label, idPrefix = 'tab' }) {
   </div>`;
 }
 
-export function Dialog({ open, onClose, title, children, actions }) {
+export function Dialog({ id = 'dialog', open, onClose, title, children, actions }) {
   const ref = useRef(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const d = ref.current;
     if (!d) return;
     if (open && !d.open) d.showModal();
     if (!open && d.open) d.close();
   }, [open]);
-  return html`<dialog ref=${ref} class="dialog" aria-labelledby="dialog-title" onClose=${onClose} onClick=${e => { if (e.target === ref.current) onClose(); }}>
+  return html`<dialog ref=${ref} class="dialog" aria-labelledby=${`${id}-title`} onCancel=${e => { e.preventDefault(); onClose(); }} onKeyDown=${e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }} onClick=${e => { if (e.target === ref.current) onClose(); }}>
     <div class="dialog-body">
-      <div class="dialog-head"><h2 id="dialog-title">${title}</h2><${Button} variant="ghost" size="sm" icon="x" label="Закрыть" onClick=${onClose} /></div>
+      <div class="dialog-head"><h2 id=${`${id}-title`}>${title}</h2><${Button} variant="ghost" size="sm" icon="x" label="Закрыть" onClick=${onClose} /></div>
       <div class="dialog-content">${children}</div>
       ${actions && html`<div class="dialog-actions">${actions}</div>`}
     </div>

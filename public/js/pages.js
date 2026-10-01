@@ -15,7 +15,8 @@ export function Overview({ data }) {
   const totalDelay = late.reduce((n, t) => n + t.delay, 0);
   const incident = data.blocked;
   return html`<${PageHeader} title="Оперативная обстановка"
-      subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`} />
+      subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
+      actions=${html`<a class="btn btn-secondary" href=${href('/trains')}><${Icon} name="train-front" size=${17} />${data.trains.length} поездов</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
     <section class="panel map-panel" aria-labelledby="map-title">
       <div class="panel-head"><div><h2 id="map-title">Схема участка в реальном времени</h2>
         <small>Сверху нечётный путь (←), снизу чётный (→). Кружки у путей — проходные светофоры автоблокировки.</small></div></div>
@@ -34,9 +35,9 @@ export function Overview({ data }) {
         note=${late.length ? `суммарно ${duration(totalDelay)}` : 'задержек нет'} />
     </section>
     <div class="grid-main">
-      <section class="panel" aria-labelledby="gid-title">
-        <div class="panel-head"><div><h2 id="gid-title">График исполненного движения (ГИД)</h2>
-          <small>Сплошная линия — прогноз, пунктир — нитка по графику. Нажмите на линию, чтобы выделить поезд.</small></div></div>
+      <section class="panel gid-panel" aria-labelledby="gid-title">
+        <div class="panel-head"><div><h2 id="gid-title">График движения <span class="gid-tag">ГИД</span></h2>
+          <small>План и прогноз движения по участку</small></div></div>
         <${Gantt} data=${data} />
       </section>
       <aside class="aside" aria-label="Что требует внимания">

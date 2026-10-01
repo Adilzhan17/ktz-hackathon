@@ -177,6 +177,68 @@ test('icons morph: sort chevron changes its path when direction flips', async ({
   expect(await d()).not.toBe(before);
 });
 
+test('quick search navigates without changing the shared shift and restores focus', async ({ page, request }) => {
+  const before = await (await request.get('/api/state')).json();
+  await page.goto('/');
+  const trigger = page.getByRole('button', { name: 'Поиск поездов и станций' });
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Найти поезд или станцию' });
+  const input = dialog.getByRole('searchbox');
+  await expect(input).toBeFocused();
+  await input.fill('153');
+  await dialog.getByRole('button', { name: /№153/ }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.locator('.selection')).toContainText('№153');
+  await page.keyboard.press('Control+k');
+  await expect(dialog).toBeVisible();
+  await input.fill('Казан');
+  await dialog.getByRole('region', { name: 'Найденные станции' }).getByRole('button', { name: /Казан/ }).click();
+  await expect(page).toHaveURL(/#\/station\/D/);
+  await expect(page.getByRole('heading', { name: 'Станция Казан' })).toBeVisible();
+  await trigger.click();
+  await input.fill('несуществующий объект');
+  await expect(dialog.getByRole('status')).toContainText('Ничего не найдено');
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+  expect((await (await request.get('/api/state')).json()).revision).toBe(before.revision);
+});
+
+test('live map opens a station and mobile overflow menu preserves secondary routes', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.m-station a')).toHaveCount(10);
+  await page.getByRole('link', { name: /^Станция Майтак,/ }).click();
+  await expect(page.getByRole('heading', { name: 'Станция Майтак' })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('.mobile-more summary').click();
+  await page.locator('.more-links').getByRole('link', { name: 'Журнал', exact: true }).click();
+  await expect(page).toHaveURL(/#\/log/);
+  await expect(page.locator('.mobile-more')).not.toHaveAttribute('open', '');
+  await page.locator('.mobile-more summary').click();
+  await page.locator('.more-links').getByRole('link', { name: 'Как это работает' }).click();
+  await expect(page).toHaveURL(/#\/how/);
+  await page.locator('.mobile-more summary').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.more-links')).not.toBeVisible();
+});
+
+test('tablet and desktop layouts contain overflow within data regions', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  for (const width of [768, 1024, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 1000 });
+    for (const path of ['/', '/#/trains', '/#/decisions', '/#/stations']) {
+      await page.goto(path);
+      await page.waitForSelector('main h1');
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${path} at ${width}`).toBeLessThanOrEqual(0);
+    }
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/');
+  await expect(page.locator('.trackmap')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('live map: trains are drawn, move with time, closure makes some stand and wait', async ({ page, request }) => {
   await page.goto('/');
   const map = page.locator('.trackmap');
@@ -203,6 +265,7 @@ test('live map: play runs the model clock and pause stops it', async ({ page }) 
   await page.getByRole('button', { name: 'Пуск' }).click();
   await expect(page.locator('.topbar .clock strong')).not.toHaveText('09:00', { timeout: 6000 });
   await page.getByRole('button', { name: 'Пауза' }).click();
+  await expect(page.locator('.topbar .clock small')).toContainText('на паузе');
   const t = await page.locator('.topbar .clock strong').innerText();
   await page.waitForTimeout(1500);
   expect(await page.locator('.topbar .clock strong').innerText()).toBe(t);
