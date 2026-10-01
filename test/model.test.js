@@ -41,8 +41,10 @@ test('reservation uses a matching track and reduces available capacity', () => {
 test('a group cannot use combined capacity spread across several tracks', () => {
   const state = createState();
   const group = state.groups.find(g => g.id === 'D-G2');
+  group.count = 15;
+  act(state, { type: 'clear', trackId: 'D-1' });
   const view = groupView(state, group);
-  assert.equal(view.available, 20);
+  assert.equal(view.available, 18);
   assert.equal(view.maxBatch, 10);
   assert.equal(view.eligible, false);
   assert.throws(() => act(state, { type: 'reserve', groupId: group.id }), /Недостаточно/);
@@ -50,10 +52,11 @@ test('a group cannot use combined capacity spread across several tracks', () => 
 
 test('earliest urgent group is not admitted when its specialization has no room', () => {
   const state = createState();
+  state.stations.find(s => s.id === 'D').tracks[1].waiting = 10;
   const groups = snapshot(state).groups.filter(g => g.stationId === 'D');
-  assert.equal(groups[0].cargo, 'oil');
+  assert.equal(groups[0].cargo, 'grain');
   assert.equal(groups[0].eligible, false);
-  assert.equal(groups.find(g => g.eligible).origin, 'Майтак');
+  assert.equal(groups.find(g => g.eligible).cargo, 'container');
 });
 
 test('cancel restores exactly the capacity reserved', () => {
@@ -76,13 +79,14 @@ test('arrival requires a reservation and reaching ETA', () => {
   const t = snapshot(state).stations.find(s => s.id === 'D').tracks.find(t => t.id === g.trackId);
   assert.equal(g.status, 'arrived');
   assert.equal(t.reserved, 0);
-  assert.equal(t.occupied, 20);
+  assert.equal(t.occupied, 10);
   assert.equal(t.processing + t.done, t.front);
   assert.equal(t.waiting, 4);
+  act(state, { type: 'advance', minutes: 60 });
   act(state, { type: 'clear', trackId: t.id });
   const after = snapshot(state).stations.find(s => s.id === 'D').tracks.find(track => track.id === t.id);
   assert.equal(after.waiting, 0);
-  assert.equal(after.processing, 10);
+  assert.equal(after.processing, 4);
 });
 
 test('time advance completes operations without releasing capacity', () => {
@@ -97,7 +101,7 @@ test('reserve and admit never overfill a track or its cargo front', () => {
   const state = createState();
   for (let i = 0; i < 30; i++) {
     for (const g of snapshot(state).groups) {
-      if (g.eligible) act(state, { type: 'reserve', groupId: g.id });
+      if (groupView(state, state.groups.find(group => group.id === g.id)).eligible) act(state, { type: 'reserve', groupId: g.id });
     }
     act(state, { type: 'advance', minutes: 60 });
     for (const g of snapshot(state).groups) {
@@ -136,9 +140,40 @@ test('invalid requests do not change state', () => {
 
 test('missing cargo specialization has no fabricated delivery slack', () => {
   const state = createState();
-  const g = groupView(state, state.groups.find(g => g.id === 'A-G6'));
+  const g = groupView(state, { ...state.groups[0], stationId: 'A', cargo: 'oil' });
   assert.equal(g.processingMinutes, null);
   assert.equal(g.slackMinutes, null);
   assert.equal(g.eligible, false);
   assert.equal(g.maxBatch, 0);
+});
+
+
+test('scenario has ten stations and thirty unique trains with one inbound group per freight train', () => {
+  const state = createState();
+  assert.equal(state.stations.length, 10);
+  assert.equal(state.trains.length, 30);
+  assert.equal(new Set(state.trains.map(t => t.number)).size, 30);
+  assert.equal(state.trains.filter(t => t.category === 'passenger').length, 6);
+  assert.equal(state.groups.length, 24);
+  assert.equal(new Set(state.groups.map(g => g.train)).size, 24);
+  assert.ok(state.stations.every(s => s.tracks.length >= 2 && s.tracks.length <= 3));
+  for (const g of state.groups) {
+    const t = state.trains.find(t => t.number === g.train);
+    assert.equal(g.count, t.wagons);
+    assert.equal(g.stationId, state.stations[t.route.at(-1)[1]].id);
+    assert.equal(g.origin, state.stations[t.route[0][1]].name);
+  }
+  for (const t of state.trains) {
+    assert.ok(t.route.every(([m, index], i) => index >= 0 && index < 10 && (i === 0 || m > t.route[i - 1][0])));
+    const forward = t.route[0][1] < t.route.at(-1)[1];
+    assert.equal(Number(t.number) % 2, forward ? 0 : 1);
+  }
+});
+
+test('closure leaves trains not crossing D–E unchanged', () => {
+  const state = createState();
+  const group = state.groups.find(g => g.id === 'D-G2');
+  const before = groupView(state, group).etaAt;
+  act(state, { type: 'block' });
+  assert.equal(groupView(state, group).etaAt, before);
 });

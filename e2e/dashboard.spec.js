@@ -10,7 +10,7 @@ test('station cargo lifecycle, reservations, closure, CSV and live update', asyn
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Оперативная обстановка' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Станция Казан' })).toBeVisible();
-  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(10);
+  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(3);
   await page.screenshot({ path: 'test-results/desktop.png', fullPage: true });
 
   const firstTrack = page.locator('.tracks-table tbody tr').first();
@@ -49,20 +49,20 @@ test('station cargo lifecycle, reservations, closure, CSV and live update', asyn
 
 test('station selection, search, filters, reset and phone layout', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Открыть станцию Кокшетау-2' }).click();
-  await expect(page.getByRole('heading', { name: 'Станция Кокшетау-2' })).toBeVisible();
-  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(4);
+  await page.getByRole('button', { name: 'Открыть станцию Караганда' }).click();
+  await expect(page.getByRole('heading', { name: 'Станция Караганда' })).toBeVisible();
+  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(2);
   await page.getByRole('button', { name: 'Схема', exact: true }).click();
   await page.locator('.map-station[data-station="D"]').click();
   await expect(page.getByRole('heading', { name: 'Станция Казан' })).toBeVisible();
-  await page.getByRole('searchbox').fill('нефтебаза');
+  await page.getByRole('searchbox').fill('элеватор');
   await expect(page.locator('.tracks-table tbody tr')).toHaveCount(1);
-  await expect(page.locator('.tracks-table tbody tr')).toContainText('Нефтебаза');
+  await expect(page.locator('.tracks-table tbody tr')).toContainText('Элеватор');
   await page.getByRole('searchbox').fill('несуществующий путь');
   await expect(page.locator('.empty')).toBeVisible();
   await page.getByRole('searchbox').fill('');
   await page.getByLabel('Фильтр', { exact: true }).selectOption('ready');
-  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(9);
+  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(2);
 
   await page.getByRole('button', { name: 'Сбросить демо' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -78,12 +78,39 @@ test('station selection, search, filters, reset and phone layout', async ({ page
 });
 
 test('API rejects invalid operations without altering inventory', async ({ request }) => {
+  await request.post('/api/action', { data: { type: 'reserve', groupId: 'D-G1' } });
   const initial = await (await request.get('/api/state')).json();
-  const invalid = await request.post('/api/action', { data: { type: 'reserve', groupId: 'D-G5' } });
+  const invalid = await request.post('/api/action', { data: { type: 'reserve', groupId: 'D-G2' } });
   expect(invalid.status()).toBe(400);
   expect((await invalid.json()).error).toContain('Недостаточно');
   const after = await (await request.get('/api/state')).json();
   expect(after.revision).toBe(initial.revision);
   expect(after.stations).toEqual(initial.stations);
   expect((await request.get('/missing')).status()).toBe(404);
+});
+
+
+test('ten stations and thirty trains remain selectable with category filters', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.svg-station')).toHaveCount(10);
+  await expect(page.locator('.train-route')).toHaveCount(30);
+  await expect(page.locator('.train-card')).toHaveCount(30);
+  await expect(page.locator('.stats-grid .stat-value').nth(0)).toContainText('10');
+  await expect(page.locator('.stats-grid .stat-value').nth(1)).toContainText('30');
+  await page.getByLabel('Категория поездов').selectOption('passenger');
+  await expect(page.locator('.train-route')).toHaveCount(6);
+  await expect(page.locator('.train-card')).toHaveCount(6);
+  await page.getByLabel('Категория поездов').selectOption('container');
+  await expect(page.locator('.train-route')).toHaveCount(9);
+  await page.getByLabel('Выделить поезд').selectOption('2085');
+  await expect(page.locator('.train-route[data-train="2085"]')).toHaveAttribute('stroke-width', '3');
+  await page.getByLabel('Категория поездов').selectOption('all');
+  await page.locator('.train-card').last().click();
+  await expect(page.locator('.train-card').last()).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Открыть станцию Кзыл-ту' }).click();
+  await expect(page.getByRole('heading', { name: 'Станция Кзыл-ту' })).toBeVisible();
+  await page.getByRole('button', { name: 'Схема', exact: true }).click();
+  await expect(page.locator('.map-station')).toHaveCount(10);
+  await page.locator('.map-station').last().click();
+  await expect(page.getByRole('heading', { name: 'Станция Кзыл-ту' })).toBeVisible();
 });
