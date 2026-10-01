@@ -149,7 +149,7 @@ function notifyPassengers(state) {
   if (state.blocked && !state.planApproved) return;
   const plan = getPlan(state);
   for (const train of state.trains) {
-    if (prioOf(state, train) !== 1) continue;
+    if (train.category !== 'passenger') continue;
     const delay = plan.byTrain[train.number].delay;
     const last = state.notified[train.number] || 0;
     if (Math.abs(delay - last) < NOTIFY_THRESHOLD && !(delay === 0 && last > 0)) continue;
@@ -281,12 +281,13 @@ export function act(state, action) {
     act(state, { type: 'reserve', groupId: g.id });
     act(state, { type: 'arrive', groupId: g.id });
   } else if (action.type === 'clock') {
-    if (action.speed !== undefined) { assert(SPEEDS.includes(action.speed), 'Скорость времени: 1, 3, 10 или 30 мин/с'); state.speed = action.speed; }
+    if (action.speed !== undefined) assert(SPEEDS.includes(action.speed), 'Скорость времени: 1, 3, 10 или 30 мин/с');
     if (action.running !== undefined) {
       assert(typeof action.running === 'boolean', 'Некорректное действие');
       assert(!action.running || state.now < endAt(state), 'Смена закончена: начните её заново');
-      state.running = action.running;
     }
+    if (action.speed !== undefined) state.speed = action.speed;
+    if (action.running !== undefined) state.running = action.running;
     state.revision += 1;
   } else if (action.type === 'block') {
     state.blocked = !state.blocked; state.planApproved = false; state.variant = null;

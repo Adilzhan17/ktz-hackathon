@@ -70,7 +70,7 @@ function naturalTimeline(state, train) {
 
 function crossing(points) {
   for (let k = 1; k < points.length; k++) {
-    if (Math.min(points[k - 1][1], points[k][1]) === CLOSED_SEGMENT) {
+    if (Math.min(points[k - 1][1], points[k][1]) === CLOSED_SEGMENT && Math.max(points[k - 1][1], points[k][1]) === CLOSED_SEGMENT + 1) {
       return { k, enter: points[k - 1][0], exit: points[k][0] };
     }
   }
@@ -162,7 +162,7 @@ function metrics(state, delays) {
     if (d <= 0) continue;
     const pr = prioOf(state, train);
     delayed += 1; total += d; weighted += d * WEIGHT[pr];
-    if (pr === 1) passenger += d;
+    if (train.category === 'passenger') passenger += d;
     max = Math.max(max, d);
   }
   return { total, weighted, passenger, max, delayedTrains: delayed };

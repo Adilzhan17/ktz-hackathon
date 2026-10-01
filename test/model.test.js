@@ -275,3 +275,43 @@ test('accept takes a group that has arrived in one step and refuses early or imp
   assert.equal(snap.groups.find(x => x.id === g.id).status, 'arrived');
   assert.throws(() => act(state, { type: 'accept', groupId: g.id }), /уже запланирована/);
 });
+
+test('held train at D still crosses the actual D–E segment safely in every variant', () => {
+  const state = createState();
+  act(state, { type: 'advance', minutes: 60 });
+  act(state, { type: 'advance', minutes: 15 });
+  act(state, { type: 'hold', train: '160', minutes: 20 });
+  act(state, { type: 'block' });
+  for (const variant of snapshot(state).dispatch.variants) {
+    state.variant = variant.id;
+    const snap = snapshot(state);
+    const intervals = snap.trains.flatMap(t => t.forecast.flatMap(([exit, to], k, points) => {
+      if (!k) return [];
+      const [enter, from] = points[k - 1];
+      return Math.min(from, to) === 3 && Math.max(from, to) === 4 ? [{ enter, exit, dir: t.direction, n: t.number }] : [];
+    }));
+    for (const a of intervals) for (const b of intervals) {
+      if (a.dir !== b.dir) assert.ok(a.exit <= b.enter || b.exit <= a.enter, `${variant.id}: ${a.n}, ${b.n}`);
+    }
+    const train = snap.trains.find(t => t.number === '160');
+    const crossing = intervals.find(i => i.n === train.number);
+    assert.equal(crossing.exit - crossing.enter, 24);
+  }
+});
+
+test('expedited freight stays freight in passenger metrics and notifications', () => {
+  const state = createState();
+  act(state, { type: 'block' });
+  act(state, { type: 'expedite', train: '3401' });
+  const snap = act(state, { type: 'approve' });
+  const pax = snap.trains.filter(t => t.category === 'passenger');
+  assert.equal(snap.dispatch.metrics.passenger, pax.reduce((n, t) => n + t.delay, 0));
+  assert.ok(snap.notifications.every(n => pax.some(t => t.number === n.train)));
+});
+
+test('combined invalid clock action cannot partially change speed', () => {
+  const state = createState();
+  const before = JSON.stringify(state);
+  assert.throws(() => act(state, { type: 'clock', speed: 10, running: 'bad' }));
+  assert.equal(JSON.stringify(state), before);
+});
