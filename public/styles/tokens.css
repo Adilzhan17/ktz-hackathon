@@ -23,18 +23,18 @@
   --text-sm: 0.8125rem;
   --text-base: 0.875rem;
   --text-md: 1rem;
-  --text-lg: 1.25rem;
-  --text-xl: 1.75rem;
+  --text-lg: 1.625rem;
+  --text-xl: 2rem;
 
   /* Нейтральные */
-  --bg: #f4f6f8;
+  --bg: #f3f6f9;
   --surface: #ffffff;
   --surface-2: #f8fafb;
-  --line: #e2e8ed;
+  --line: #dfe7ee;
   --line-strong: #c9d3da;
-  --text: #11212c;
+  --text: #152e40;
   --text-2: #425564;
-  --text-3: #63767f;
+  --text-3: #586e7c;
 
   /* Акцент КТЖ */
   --brand: #00a9d8;
@@ -57,15 +57,15 @@
 
   /* Форма */
   --radius-s: 6px;
-  --radius: 10px;
-  --radius-l: 14px;
+  --radius: 8px;
+  --radius-l: 12px;
   --shadow-1: 0 1px 2px rgb(11 42 60 / 6%), 0 1px 1px rgb(11 42 60 / 4%);
   --shadow-2: 0 8px 28px rgb(11 42 60 / 14%);
   --focus: 0 0 0 3px rgb(0 169 216 / 45%);
 
   /* Сетка */
-  --nav-w: 244px;
-  --topbar-h: 64px;
+  --nav-w: 220px;
+  --topbar-h: 72px;
   --gutter: clamp(16px, 2.2vw, 32px);
 }
 @media (prefers-reduced-motion: no-preference) {

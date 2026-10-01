@@ -7,6 +7,17 @@ import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } f
 
 const stationName = (data, i) => data.stations[i].name;
 
+function Corridor({ data }) {
+  const closed = data.dispatch.closedSegment;
+  return html`<section class="corridor" aria-label="Схема участка">
+    <div class="corridor-header"><span><strong>${data.stations.length} станций</strong> · ${data.stations.at(-1).km} км</span><span>Нажмите на станцию, чтобы открыть грузовую работу</span></div>
+    <div class="corridor-scroll"><ol class="corridor-stops">${data.stations.map((s, i) => html`<li key=${s.id} class=${data.blocked && i === closed ? 'segment-closed' : ''}>
+      <a href=${href(`/station/${s.id}`)} aria-label=${`Открыть станцию ${s.name}`}><span class="stop-code">${s.id}</span><strong>${s.name}</strong><small>${s.km} км</small></a>
+      ${data.blocked && i === closed && html`<span class="segment-warning" title="Нечётный путь закрыт"><${Icon} name="triangle-alert" size=${14} /><span class="sr-only">Нечётный путь закрыт</span></span>`}
+    </li>`)}</ol></div>
+  </section>`;
+}
+
 export function Overview({ data }) {
   const late = data.trains.filter(t => t.delay > 0);
   const passengerLate = data.trains.filter(t => t.priority === 1 && t.delay > 0);
@@ -14,7 +25,9 @@ export function Overview({ data }) {
   const totalDelay = late.reduce((n, t) => n + t.delay, 0);
   const incident = data.blocked;
   return html`<${PageHeader} title="Оперативная обстановка"
-      subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`} />
+      subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
+      actions=${html`<a class="btn btn-secondary" href=${href('/trains')}><${Icon} name="train-front" size=${17} />${data.trains.length} поездов</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
+    <${Corridor} data=${data} />
     <section class="kpis" aria-label="Показатели участка">
       <${Kpi} label="Состояние участка" icon="activity" tone=${incident ? 'danger' : 'neutral'}
         value=${incident ? 'Инцидент' : data.restrictions.length ? 'Ограничения' : 'Норма'}
@@ -28,9 +41,9 @@ export function Overview({ data }) {
         note=${late.length ? `суммарно ${duration(totalDelay)}` : 'задержек нет'} />
     </section>
     <div class="grid-main">
-      <section class="panel" aria-labelledby="gid-title">
-        <div class="panel-head"><div><h2 id="gid-title">График исполненного движения (ГИД)</h2>
-          <small>Сплошная линия — прогноз, пунктир — нитка по графику. Нажмите на линию, чтобы выделить поезд.</small></div></div>
+      <section class="panel gid-panel" aria-labelledby="gid-title">
+        <div class="panel-head"><div><h2 id="gid-title">График движения <span class="gid-tag">ГИД</span></h2>
+          <small>План и прогноз движения по участку</small></div></div>
         <${Gantt} data=${data} />
       </section>
       <aside class="aside" aria-label="Что требует внимания">
