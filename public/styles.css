@@ -1695,3 +1695,60 @@ dialog p {
     padding:50px 20px;
   }
 }
+
+/* ===== Фирменный стиль КТЖ ===== */
+:root {
+  --green:#0b6fb0;
+  --dark:#0a3558;
+  --ktz-blue:#0095da;
+  --ktz-gold:#a67c00;
+}
+.sidebar {
+  background:linear-gradient(180deg,#0a3558,#082a46);
+}
+.brand {
+  width:50px;
+  height:48px;
+  margin-top:16px;
+  background:url(/assets/ktz-emblem.png) center/contain no-repeat;
+}
+.brand .icon {
+  display:none;
+}
+.workspace::before {
+  content:"Интеллектуальный модуль ГИД · Национальная компания «Қазақстан темір жолы»";
+  display:flex;
+  align-items:center;
+  height:56px;
+  padding:0 32px 0 calc(32px + 324px + 28px);
+  background:url(/assets/ktz-wordmark.png) 32px center/auto 36px no-repeat,linear-gradient(90deg,#0a3558 0%,#0b6fb0 100%);
+  color:#d6ecfa;
+  font-size:12px;
+  letter-spacing:.02em;
+  white-space:nowrap;
+  overflow:hidden;
+}
+.topbar {
+  position:relative;
+}
+.topbar::after {
+  content:"";
+  position:absolute;
+  inset:auto 0 -1px 0;
+  height:4px;
+  background:linear-gradient(90deg,var(--ktz-blue) 0 78%,var(--ktz-gold) 78% 100%);
+}
+.primary {
+  background:var(--green);
+  border-color:var(--green);
+}
+.primary:hover {
+  background:#095c94;
+}
+@media (max-width:900px) {
+  .workspace::before {
+    content:"";
+    padding:0;
+    background-size:auto 30px;
+  }
+}

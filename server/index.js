@@ -8,7 +8,7 @@ const clients = new Set();
 const publicRoot = new URL('../public/', import.meta.url);
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '127.0.0.1';
-const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
+const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
@@ -40,7 +40,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'Метод API не найден' });
     if (req.method !== 'GET') return json(res, 405, { error: 'Метод не поддерживается' });
-    const allowed = { '/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg' };
+    const allowed = { '/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg', '/assets/ktz-emblem.png': 'assets/ktz-emblem.png', '/assets/ktz-wordmark.png': 'assets/ktz-wordmark.png' };
     const file = allowed[url.pathname];
     if (!file) return json(res, 404, { error: 'Страница не найдена' });
     const ext = file.slice(file.lastIndexOf('.'));
