@@ -1,6 +1,7 @@
+import { stationTraffic } from './station-metrics.js';
 import { useState } from 'preact/hooks';
 import { html, Icon, duration, time, dateShort, clockAt, downloadCsv, delayText, count } from './lib.js';
-import { app, act, go, href } from './store.js';
+import { app, act, go, href, useLiveNow } from './store.js';
 import { Button, Badge, Kpi, PageHeader, Tabs, Segmented, Empty } from './ui.js';
 
 function Occupancy({ t }) {
@@ -16,7 +17,7 @@ function Occupancy({ t }) {
 
 function Tracks({ station, data }) {
   return html`<div class="table-wrap"><table class="table responsive">
-    <thead><tr><th scope="col">Путь</th><th scope="col">Загрузка</th><th scope="col">Состояние</th><th scope="col">Доступно для подачи</th><th scope="col">Освободится</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
+    <thead><tr><th scope="col">Путь</th><th scope="col">Загрузка</th><th scope="col">Состояние</th><th scope="col">Доступно для подачи</th><th scope="col">Оценка освобождения</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
     <tbody>${station.tracks.map(t => html`<tr key=${t.id}>
       <td data-label="Путь"><div class="two"><strong>${t.number}. ${t.name}</strong><small>${data.cargoNames[t.cargo]} · ${t.productivity} ваг./ч · фронт ${t.front}</small></div></td>
       <td data-label="Загрузка"><${Occupancy} t=${t} /></td>
@@ -24,7 +25,7 @@ function Tracks({ station, data }) {
         <span>${t.processing ? `Идёт обработка: ${t.processing} ваг.` : 'Обработки нет'}</span>
         <small>${t.done ? `${t.done} ваг. обработано, ждут уборки` : ''}${t.waiting ? ` ${t.waiting} ждут фронта` : ''}${!t.done && !t.waiting ? 'ожидающих нет' : ''}</small></div></td>
       <td data-label="Доступно" class="num"><strong>${t.available}</strong> ваг.${t.reserved ? html`<small> · резерв ${t.reserved}</small>` : ''}</td>
-      <td data-label="Освободится" class="num">${t.releaseAt ? time(t.releaseAt) : html`<span class="muted">Свободен</span>`}</td>
+      <td data-label="Оценка освобождения" class="num">${t.releaseAt ? time(t.releaseAt) : html`<span class="muted">Свободен</span>`}</td>
       <td class="actions-cell"><div class="btn-row">
         <${Button} size="sm" icon="check" onClick=${() => act({ type: 'complete', trackId: t.id })} disabled=${!t.processing} pending=${app.busy}
           reason="Нет вагонов под грузовыми операциями" title="Завершить обработку вагонов на этом пути">Завершить</${Button}>
@@ -33,16 +34,16 @@ function Tracks({ station, data }) {
     </tr>`)}</tbody></table></div>
     <div class="legend inline" aria-label="Обозначения загрузки">
       <span><i class="sw processing"></i>В работе</span><span><i class="sw done"></i>Обработано</span><span><i class="sw waiting"></i>Ждут фронта</span><span><i class="sw reserved"></i>Резерв</span></div>
-    <p class="note"><${Icon} name="info" size=${15} /> Порядок работы: принять группу → обработать → убрать вагоны. Путь освобождается только после уборки.</p>`;
+    <p class="note"><${Icon} name="info" size=${15} /> Порядок работы: принять группу → обработать → убрать вагоны. Путь освобождается только после уборки. Время освобождения — оценка при уборке каждой партии за 30 минут; сама уборка выполняется по команде.</p>`;
 }
 
-const STATUS = { reserved: ['accent', 'Резерв'], arrived: ['neutral', 'Принята'], ready: ['accent', 'Можно принять'], none: ['danger', 'Нет ёмкости'] };
+const STATUS = { reserved: ['accent', 'Резерв'], arrived: ['neutral', 'Принята'], ready: ['accent', 'Есть ёмкость'], none: ['danger', 'Нет ёмкости'] };
 
 function Arrivals({ station, data }) {
   const [filter, setFilter] = useState('all');
   const groups = data.groups.filter(g => g.stationId === station.id && (filter === 'all' ? g.status !== 'arrived' : filter === 'ready' ? g.eligible : g.status === 'reserved'));
   return html`<div class="toolbar"><${Segmented} label="Фильтр групп" value=${filter} onChange=${setFilter}
-      options=${[{ value: 'all', label: 'Все' }, { value: 'ready', label: 'Можно принять' }, { value: 'reserved', label: 'В резерве' }]} /></div>
+      options=${[{ value: 'all', label: 'Все' }, { value: 'ready', label: 'Есть ёмкость' }, { value: 'reserved', label: 'В резерве' }]} /></div>
     <div class="table-wrap"><table class="table responsive">
       <thead><tr><th scope="col">Группа</th><th scope="col">Откуда</th><th scope="col">Прибытие</th><th scope="col">До срока доставки</th><th scope="col">Запас после обработки</th><th scope="col">Решение</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
       <tbody>${groups.map(g => {
@@ -84,11 +85,13 @@ function Recommendation({ station, data }) {
 }
 
 export function StationPage({ data, params }) {
+  const now = useLiveNow(4);
   const station = data.stations.find(s => s.id === params.id);
   if (!station) return html`<${PageHeader} title="Станция не найдена" crumbs=${[{ label: 'Станции', href: href('/stations') }, { label: params.id || '—' }]} />
     <${Empty} icon="search" title="Такой станции нет"><a href=${href('/stations')}>Вернуться к списку станций</a></${Empty}>`;
   const tab = params.tab === 'arrivals' ? 'arrivals' : 'tracks';
   const arrivals = data.groups.filter(g => g.stationId === station.id && g.status !== 'arrived').length;
+  const traffic = stationTraffic(data, station.id, now);
   const load = Math.round(station.occupied / station.capacity * 100);
   const exportCsv = () => downloadCsv(`station-${station.id}.csv`, [
     ['Автодиспетчер — отчёт по станции', station.name, time(data.now)],
@@ -104,7 +107,7 @@ export function StationPage({ data, params }) {
       <${Kpi} label="Подъездные пути" icon="route" value=${station.tracks.length} note=${`вместимость ${station.capacity} ваг.`} />
       <${Kpi} label="Вагонов на путях" icon="package" value=${station.occupied} note=${`занятость ${load}%`} />
       <${Kpi} label="Доступно для подачи" icon="circle-check" value=${station.available} unit="ваг." note="за вычетом резерва" />
-      <${Kpi} label="В резерве" icon="hourglass" value=${station.reserved} unit="ваг." note=${count(arrivals, ['группа подходит', 'группы подходят', 'групп подходит'])} />
+      <${Kpi} label="В резерве" icon="hourglass" value=${station.reserved} unit="ваг." note=${`Ждут приёма: ${traffic.waiting} гр. · в пути: ${traffic.enRoute} гр.`} />
     </section>
     <${Recommendation} station=${station} data=${data} />
     <section class="panel">

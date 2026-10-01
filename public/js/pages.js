@@ -1,6 +1,7 @@
+import { stationTraffic } from './station-metrics.js';
 import { useMemo, useState } from 'preact/hooks';
 import { html, Icon, count, delayText, clockAt, duration, PRIORITY, DIRECTION, downloadCsv, time, dateLong } from './lib.js';
-import { app, go, href, updateUi } from './store.js';
+import { app, go, href, updateUi, useLiveNow } from './store.js';
 import { Button, Badge, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { Gantt } from './gantt.js';
 import { TrackMap } from './trackmap.js';
@@ -11,7 +12,7 @@ const stationName = (data, i) => data.stations[i].name;
 
 export function Overview({ data }) {
   const late = data.trains.filter(t => t.delay > 0);
-  const passengerLate = data.trains.filter(t => t.priority === 1 && t.delay > 0);
+  const passengerLate = data.trains.filter(t => t.category === 'passenger' && t.delay > 0);
   const worst = passengerLate.reduce((m, t) => Math.max(m, t.delay), 0);
   const totalDelay = late.reduce((n, t) => n + t.delay, 0);
   const incident = data.blocked;
@@ -32,7 +33,7 @@ export function Overview({ data }) {
         value=${data.dispatch.conflicts.length} note=${data.dispatch.conflicts.length ? 'встречных поездов на одном пути' : 'встречных поездов нет'} />
       <${Kpi} label="Опоздание пассажирских" icon="train-front" tone=${worst ? 'danger' : 'neutral'}
         value=${worst ? `+${worst}` : '0'} unit="мин"
-        note=${passengerLate.length ? `${count(passengerLate.length, ['поезд задерживается', 'поезда задерживаются', 'поездов задерживается'])} из ${data.trains.filter(t => t.priority === 1).length}` : 'все пассажирские по графику'} />
+        note=${passengerLate.length ? `${count(passengerLate.length, ['поезд задерживается', 'поезда задерживаются', 'поездов задерживается'])} из ${data.trains.filter(t => t.category === 'passenger').length}` : 'все пассажирские по графику'} />
       <${Kpi} label="Задержано поездов" icon="hourglass" value=${late.length} unit=${`из ${data.trains.length}`}
         note=${late.length ? `суммарно ${duration(totalDelay)}` : 'задержек нет'} />
     </section>
@@ -127,18 +128,25 @@ export function Trains({ data }) {
 }
 
 export function Stations({ data }) {
+  const now = useLiveNow(4);
   return html`<${PageHeader} title="Станции" subtitle="Грузовая работа, подъездные пути и подход вагонов по каждой станции" />
+    <p class="note station-explainer">Занятость — вагоны на подъездных путях. Проходящие поезда и группы, ожидающие команды «Принять», в неё не входят. После обработки вагоны занимают путь до уборки.</p>
     <div class="station-grid">
       ${data.stations.map(s => {
         const load = Math.round(s.occupied / s.capacity * 100);
-        const arrivals = data.groups.filter(g => g.stationId === s.id && g.status !== 'arrived').length;
-        return html`<a key=${s.id} class="panel station-card" href=${href(`/station/${s.id}`)}>
+        const traffic = stationTraffic(data, s.id, now);
+        return html`<a key=${s.id} class="panel station-card" data-station=${s.id} href=${href(`/station/${s.id}`)}>
           <div class="sc-head"><span class="code lg">${s.id}</span><div><h2>${s.name}</h2><small>${s.type} · ${s.km} км</small></div></div>
-          <div class="meter lg" role="img" aria-label=${`Занятость ${load}%`}><i style=${`width:${load}%`}></i></div>
+          <div class="sc-occupancy"><strong>${s.occupied} / ${s.capacity} ваг.</strong><span>${load}% занято</span></div>
+          <div class="occ-bar" role="img" aria-label=${`На подъездных путях ${s.occupied} из ${s.capacity} вагонов, резерв ${s.reserved}`}>
+            ${['processing', 'done', 'waiting', 'reserved'].map(key => html`<i key=${key} class=${`seg ${key}`} style=${`width:${s[key] / s.capacity * 100}%`}></i>`)}
+          </div>
+          <div class="sc-cargo"><span>В работе ${s.processing}</span><span>Обработано ${s.done}</span><span>Ждут фронта ${s.waiting}</span></div>
           <dl class="sc-stats">
-            <div><dt>Занятость</dt><dd>${load}%</dd></div>
-            <div><dt>Свободно</dt><dd>${s.available}</dd></div>
-            <div><dt>Подходит</dt><dd>${arrivals}</dd></div>
+            <div><dt>Доступно, ваг.</dt><dd>${s.available}</dd></div>
+            <div><dt>Резерв, ваг.</dt><dd>${s.reserved}</dd></div>
+            <div><dt>Ждут приёма</dt><dd>${traffic.waiting} гр.</dd><small>${traffic.waitingWagons} ваг.</small></div>
+            <div><dt>В пути</dt><dd>${traffic.enRoute} гр.</dd><small>${traffic.enRouteWagons} ваг.</small></div>
           </dl></a>`;
       })}
     </div>`;

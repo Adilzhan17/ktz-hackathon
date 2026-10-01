@@ -322,3 +322,22 @@ test('map is tied to data: arrived wagon groups are flagged on the station and c
   await accept.click();
   await expect(page.locator('.toast').last()).toContainText('принято');
 });
+
+test('station cards and map agree on occupied wagons and reserved arrival queue', async ({ page, request }) => {
+  await request.post('/api/action', { data: { type: 'reserve', groupId: 'D-G1' } });
+  await request.post('/api/action', { data: { type: 'advance', minutes: 60 } });
+  await page.goto('/#/stations');
+  const card = page.locator('[data-station="D"]');
+  await expect(card.locator('.sc-occupancy')).toContainText('10 / 30 ваг.');
+  await expect(card.locator('.sc-stats > div').filter({ hasText: 'Ждут приёма' })).toContainText('1 гр.');
+  await expect(card.locator('.sc-stats > div').filter({ hasText: 'В пути' })).toContainText('2 гр.');
+  await page.goto('/');
+  const station = page.locator('.m-station').filter({ has: page.getByRole('link', { name: /^Станция Казан,/ }) });
+  await expect(station.locator('.m-load')).toHaveText('10 / 30 ваг.');
+  await expect(station.locator('.m-badge-t')).toHaveText('ждут приёма 1');
+  await request.post('/api/action', { data: { type: 'arrive', groupId: 'D-G1' } });
+  await expect(station.locator('.m-load')).toHaveText('20 / 30 ваг.');
+  await page.goto('/#/stations');
+  await expect(card.locator('.sc-occupancy')).toContainText('20 / 30 ваг.');
+  await expect(card.locator('.sc-stats > div').filter({ hasText: 'Ждут приёма' })).toContainText('0 гр.');
+});

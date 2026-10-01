@@ -39,7 +39,7 @@ function buildTasks(data, nowMs) {
       text: `${data.cargoNames[g.cargo]}, ${g.count} ваг. на «${data.stations.find(s => s.id === g.stationId).name}»: запас ${duration(g.slackMinutes)}.`,
       actions: [{ label: 'Станция', icon: 'building-2', run: () => updateUi({ selectedStation: g.stationId }) }] });
   }
-  for (const t of data.trains.filter(t => t.priority === 1 && t.delay >= 5).sort((a, b) => b.delay - a.delay).slice(0, 3)) {
+  for (const t of data.trains.filter(t => t.category === 'passenger' && t.delay >= 5).sort((a, b) => b.delay - a.delay).slice(0, 3)) {
     tasks.push({ id: `pax${t.number}`, tone: 'neutral', icon: 'bell-ring', title: `Пассажирский №${t.number} опаздывает на ${t.delay} мин`,
       text: 'Пассажиры уведомлены автоматически о новом времени прибытия.', info: true, actions: [{ label: 'Показать', icon: 'eye', variant: 'ghost', run: () => pick(t.number) }] });
   }
