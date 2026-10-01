@@ -4,113 +4,119 @@ test.beforeEach(async ({ request }) => {
   await request.post('/api/action', { data: { type: 'reset' } });
 });
 
-test('station cargo lifecycle, reservations, closure, CSV and live update', async ({ page, context }) => {
-  const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+test('overview shows operational KPIs and the Gantt chart', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Оперативная обстановка' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Станция Казан' })).toBeVisible();
-  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(3);
-  await page.screenshot({ path: 'test-results/desktop.png', fullPage: true });
+  await expect(page.getByText('Движение по графику')).toBeVisible();
+  await expect(page.getByRole('img', { name: /График движения: 30 поездов/ })).toBeVisible();
+  await expect(page.getByText('Конфликтов нет')).toBeVisible();
+});
 
-  const firstTrack = page.locator('.tracks-table tbody tr').first();
-  await expect(firstTrack.locator('.done-count')).toHaveText('8');
-  await firstTrack.getByRole('button', { name: 'Завершить' }).click();
-  await expect(firstTrack.locator('.done-count')).toHaveText('10');
-  await expect(firstTrack.locator('.pill')).toHaveText('0 ваг.');
-  await firstTrack.getByRole('button', { name: 'Убрать 10' }).click();
-  await expect(firstTrack.locator('.pill')).toHaveText('10 ваг.');
-
-  await page.getByRole('tab', { name: /Подход вагонов/ }).click();
-  const grain = page.locator('.groups-table tbody tr').filter({ hasText: 'Майтак' });
-  await grain.getByRole('button', { name: 'В план' }).click();
-  await expect(grain.locator('.pill.blue')).toHaveText('Резерв');
-  await expect(grain.getByRole('button', { name: 'Принять' })).toBeDisabled();
-  await grain.getByRole('button', { name: 'Отменить' }).click();
-  await expect(grain.getByRole('button', { name: 'В план' })).toBeEnabled();
-
-  const secondPage = await context.newPage();
-  await secondPage.goto('/');
-  await page.getByRole('button', { name: 'Сценарий: закрытие D–E' }).click();
-  await expect(secondPage.getByRole('button', { name: 'Снять закрытие D–E' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Пассажирский — первым' })).toBeVisible();
+test('closure: conflicts, three variants, choosing and confirming a plan notifies passengers', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: /Закрыть перегон D–E/ }).click();
+  await expect(page.getByText('Закрыт нечётный путь D–E')).toBeVisible();
+  const variants = page.getByRole('radiogroup', { name: 'Варианты пропуска поездов' }).locator('label.variant');
+  await expect(variants).toHaveCount(3);
+  await expect(variants.first()).toContainText('Рекомендуется');
+  await variants.nth(2).click();
+  await expect(variants.nth(2)).toHaveClass(/on/);
+  await expect(page.getByText('Уведомления пассажирам')).toBeVisible();
+  await expect(page.locator('.notices li')).toHaveCount(0);       // до подтверждения пассажиров не тревожим
   await page.getByRole('button', { name: 'Подтвердить вариант' }).click();
-  await expect(page.locator('.graph-caption')).toContainText('учебный вариант подтверждён');
-  await page.getByRole('button', { name: 'Снять закрытие D–E' }).click();
-
-  const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Выгрузить CSV' }).click();
-  const download = await downloadPromise;
-  expect(download.suggestedFilename()).toMatch(/^autodispatch-D-\d+\.csv$/);
-  expect(await download.failure()).toBeNull();
-  expect(errors).toEqual([]);
-  await secondPage.close();
+  await expect(page.getByText('План подтверждён')).toBeVisible();
+  await expect(page.locator('.notices li').first()).toContainText('опоздание');
+  await page.getByRole('button', { name: 'Снять закрытие' }).click();
+  await expect(page.getByText('Конфликтов нет')).toBeVisible();
 });
 
-test('station selection, search, filters, reset and phone layout', async ({ page }) => {
+test('speed restriction is entered and lifted, delays appear in KPIs', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'Открыть станцию Караганда' }).click();
-  await expect(page.getByRole('heading', { name: 'Станция Караганда' })).toBeVisible();
-  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(2);
-  await page.getByRole('button', { name: 'Схема', exact: true }).click();
-  await page.locator('.map-station[data-station="D"]').click();
+  await page.getByLabel('Перегон').selectOption('4');
+  await page.getByLabel('Скорость, км/ч').selectOption('25');
+  await page.getByRole('button', { name: 'Ввести', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Ограничения скорости' })).toBeVisible();
+  await expect(page.locator('.kpi', { hasText: 'Задержано поездов' })).not.toContainText('задержек нет');
+  await page.getByRole('button', { name: 'Снять', exact: true }).click();
+  await expect(page.locator('.kpi', { hasText: 'Задержано поездов' })).toContainText('задержек нет');
+});
+
+test('station lifecycle: complete, clear, reserve, time advance, admit', async ({ page }) => {
+  await page.goto('/#/station/D');
   await expect(page.getByRole('heading', { name: 'Станция Казан' })).toBeVisible();
-  await page.getByRole('searchbox').fill('элеватор');
-  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(1);
-  await expect(page.locator('.tracks-table tbody tr')).toContainText('Элеватор');
-  await page.getByRole('searchbox').fill('несуществующий путь');
-  await expect(page.locator('.empty')).toBeVisible();
-  await page.getByRole('searchbox').fill('');
-  await page.getByLabel('Фильтр', { exact: true }).selectOption('ready');
-  await expect(page.locator('.tracks-table tbody tr')).toHaveCount(2);
-
-  await page.getByRole('button', { name: 'Сбросить демо' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Отмена', exact: true }).click();
-  await expect(page.getByRole('dialog')).not.toBeVisible();
-
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'График', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Оперативная обстановка' })).toBeVisible();
-  const sizes = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
-  expect(sizes.scroll).toBeLessThanOrEqual(sizes.client);
-  await page.screenshot({ path: 'test-results/mobile.png', fullPage: true });
+  const row = page.locator('tbody tr').first();
+  await row.getByRole('button', { name: 'Завершить' }).click();
+  await expect(row.getByRole('button', { name: /Убрать 10/ })).toBeVisible();
+  await row.getByRole('button', { name: /Убрать 10/ }).click();
+  await expect(row).toContainText('Обработки нет');
+  await page.getByRole('button', { name: 'Зарезервировать приём' }).click();
+  await expect(page.locator('.kpi', { hasText: 'В резерве' })).toContainText('10');
+  await page.getByRole('tab', { name: /Подход вагонов/ }).click();
+  await expect(page).toHaveURL(/#\/station\/D\/arrivals/);
+  const accept = page.getByRole('button', { name: 'Принять' });
+  await expect(accept).toHaveAttribute('aria-disabled', 'true'); // группа ещё в пути, причина объяснена
+  for (let i = 0; i < 2; i++) await page.getByRole('button', { name: '+1 час' }).click();
+  await accept.click();
+  await expect(page.locator('.badge', { hasText: 'Принята' })).toHaveCount(0); // принятые уходят из очереди
+  await expect(page.locator('.toast').last()).toContainText('принято');
 });
 
-test('API rejects invalid operations without altering inventory', async ({ request }) => {
-  await request.post('/api/action', { data: { type: 'reserve', groupId: 'D-G1' } });
-  const initial = await (await request.get('/api/state')).json();
-  const invalid = await request.post('/api/action', { data: { type: 'reserve', groupId: 'D-G2' } });
-  expect(invalid.status()).toBe(400);
-  expect((await invalid.json()).error).toContain('Недостаточно');
+test('keyboard focus survives an action (no full re-render)', async ({ page }) => {
+  await page.goto('/#/station/D');
+  const btn = page.locator('tbody tr').first().getByRole('button', { name: 'Завершить' });
+  await btn.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('tbody tr').first().getByRole('button', { name: /Убрать 10/ })).toBeVisible();
+  await expect(btn).toBeFocused();
+});
+
+test('trains page: filter, sort, show on Gantt', async ({ page }) => {
+  await page.goto('/#/trains');
+  await expect(page.locator('tbody tr')).toHaveCount(30);
+  await page.getByRole('radio', { name: 'Пассажирские' }).click();
+  await expect(page.locator('tbody tr')).toHaveCount(6);
+  await page.getByRole('searchbox').fill('153');
+  await expect(page.locator('tbody tr')).toHaveCount(1);
+  await page.getByRole('button', { name: 'На ГИД' }).click();
+  await expect(page).toHaveURL(/#\/$|\/$/);
+  await expect(page.locator('.selection')).toContainText('№153');
+});
+
+test('station list, deep link and unknown station', async ({ page }) => {
+  await page.goto('/#/stations');
+  await page.getByRole('link', { name: /Майтак/ }).click();
+  await expect(page).toHaveURL(/#\/station\/E/);
+  await page.goto('/#/station/ZZ');
+  await expect(page.getByText('Такой станции нет')).toBeVisible();
+});
+
+test('API rejects invalid operations without altering state', async ({ request }) => {
+  const before = await (await request.get('/api/state')).json();
+  for (const bad of [{ type: 'complete', trackId: 'X' }, { type: 'restrict', segment: 99, kmh: 25 }, { type: 'advance', minutes: 7 }, { type: 'nope' }]) {
+    const res = await request.post('/api/action', { data: bad });
+    expect(res.status()).toBe(400);
+  }
   const after = await (await request.get('/api/state')).json();
-  expect(after.revision).toBe(initial.revision);
-  expect(after.stations).toEqual(initial.stations);
-  expect((await request.get('/missing')).status()).toBe(404);
+  expect(after.revision).toBe(before.revision);
+  expect((await request.get('/../server/model.js')).status()).toBe(404);
 });
 
+test('two tabs stay in sync', async ({ browser }) => {
+  const a = await (await browser.newContext()).newPage();
+  const b = await (await browser.newContext()).newPage();
+  await a.goto('/'); await b.goto('/');
+  await a.getByRole('button', { name: '+15 мин' }).click();
+  await expect(b.locator('.clock strong')).toHaveText('09:15');
+});
 
-test('ten stations and thirty trains remain selectable with category filters', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.locator('.svg-station')).toHaveCount(10);
-  await expect(page.locator('.train-route')).toHaveCount(30);
-  await expect(page.locator('.train-card')).toHaveCount(30);
-  await expect(page.locator('.stats-grid .stat-value').nth(0)).toContainText('10');
-  await expect(page.locator('.stats-grid .stat-value').nth(1)).toContainText('30');
-  await page.getByLabel('Категория поездов').selectOption('passenger');
-  await expect(page.locator('.train-route')).toHaveCount(6);
-  await expect(page.locator('.train-card')).toHaveCount(6);
-  await page.getByLabel('Категория поездов').selectOption('container');
-  await expect(page.locator('.train-route')).toHaveCount(9);
-  await page.getByLabel('Выделить поезд').selectOption('2085');
-  await expect(page.locator('.train-route[data-train="2085"]')).toHaveAttribute('stroke-width', '3');
-  await page.getByLabel('Категория поездов').selectOption('all');
-  await page.locator('.train-card').last().click();
-  await expect(page.locator('.train-card').last()).toHaveAttribute('aria-pressed', 'true');
-  await page.getByRole('button', { name: 'Открыть станцию Кзыл-ту' }).click();
-  await expect(page.getByRole('heading', { name: 'Станция Кзыл-ту' })).toBeVisible();
-  await page.getByRole('button', { name: 'Схема', exact: true }).click();
-  await expect(page.locator('.map-station')).toHaveCount(10);
-  await page.locator('.map-station').last().click();
-  await expect(page.getByRole('heading', { name: 'Станция Кзыл-ту' })).toBeVisible();
+test('phone layout: no horizontal overflow, bottom navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const path of ['/', '/#/trains', '/#/station/D', '/#/log']) {
+    await page.goto(path);
+    await page.waitForSelector('main h1');
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(overflow, path).toBeLessThanOrEqual(0);
+  }
+  const nav = await page.locator('.nav').boundingBox();
+  expect(nav.y).toBeGreaterThan(700);
 });

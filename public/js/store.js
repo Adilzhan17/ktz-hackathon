@@ -1,0 +1,94 @@
+import { useEffect, useRef, useState } from 'preact/hooks';
+
+// Единый источник состояния клиента: серверный снимок + локальные настройки интерфейса.
+const listeners = new Set();
+export const app = {
+  data: null, online: false, failed: false, busy: false,
+  route: { page: 'overview', params: {} },
+  ui: { category: 'all', selectedTrain: null, zoom: 8, shift: 0, follow: true },
+  toasts: [],
+};
+
+let version = 0;
+function emit() { version += 1; for (const l of listeners) l(); }
+export function update(patch) { Object.assign(app, patch); emit(); }
+export function updateUi(patch) { app.ui = { ...app.ui, ...patch }; emit(); }
+
+export function useApp() {
+  const [, set] = useState(0);
+  const seen = useRef(version);
+  seen.current = version;
+  useEffect(() => {
+    const l = () => set(n => n + 1);
+    listeners.add(l);
+    // Обновление могло прийти между первым рендером и подпиской — не теряем его.
+    if (seen.current !== version) l();
+    return () => listeners.delete(l);
+  }, []);
+  return app;
+}
+
+// ---- уведомления на экране ----
+let toastId = 0;
+export function toast(text, kind = 'info') {
+  const id = ++toastId;
+  app.toasts = [...app.toasts.slice(-3), { id, text, kind }];
+  emit();
+  setTimeout(() => dismissToast(id), kind === 'error' ? 9000 : 5500);
+}
+export function dismissToast(id) { app.toasts = app.toasts.filter(t => t.id !== id); emit(); }
+
+// ---- маршрутизация по hash: #/  #/trains  #/stations  #/station/D/arrivals  #/log ----
+export function parseHash(hash = location.hash) {
+  const [path, query = ''] = hash.replace(/^#/, '').split('?');
+  const parts = path.split('/').filter(Boolean);
+  const params = Object.fromEntries(new URLSearchParams(query));
+  if (!parts.length) return { page: 'overview', params };
+  if (parts[0] === 'station') return { page: 'station', params: { ...params, id: parts[1], tab: parts[2] || 'tracks' } };
+  if (['trains', 'stations', 'log'].includes(parts[0])) return { page: parts[0], params };
+  return { page: 'overview', params };
+}
+export const href = (path = '/') => `#${path}`;
+export function go(path) { location.hash = path; }
+
+function syncRoute() {
+  const route = parseHash();
+  if (route.params.train && app.data?.trains.some(t => t.number === route.params.train)) app.ui = { ...app.ui, selectedTrain: route.params.train };
+  app.route = route;
+  emit();
+  window.scrollTo({ top: 0 });
+}
+window.addEventListener('hashchange', syncRoute);
+app.route = parseHash();
+
+// ---- связь с сервером ----
+export function connect() {
+  const source = new EventSource('/api/events');
+  source.onopen = () => update({ online: true, failed: false });
+  source.onmessage = e => {
+    const next = JSON.parse(e.data);
+    const same = app.data && next.revision === app.data.revision && next.now === app.data.now;
+    update(same ? { online: true } : { data: next, online: true, failed: false });
+  };
+  source.onerror = () => update({ online: false, failed: !app.data });
+}
+
+export async function act(payload) {
+  if (app.busy || !app.online) return false;
+  update({ busy: true });
+  try {
+    const res = await fetch('/api/action', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Не удалось выполнить действие');
+    update({ data, busy: false });
+    toast(data.log[0].text);
+    return true;
+  } catch (e) {
+    update({ busy: false });
+    toast(e.name === 'TimeoutError' ? 'Сервер не ответил за 8 секунд. Проверьте соединение.' : e.message, 'error');
+    return false;
+  }
+}

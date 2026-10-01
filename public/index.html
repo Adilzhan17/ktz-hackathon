@@ -3,14 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#163a39" />
-    <title>Автодиспетчер — оперативная обстановка</title>
+    <meta name="theme-color" content="#0b2a3c" />
+    <meta name="description" content="Автодиспетчер: помощник поездного диспетчера для ГИД — конфликты, варианты пропуска, прогноз опозданий." />
+    <title>Автодиспетчер — КТЖ</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
-    <script type="module" src="/app.js"></script>
+    <link rel="preload" href="/fonts/inter-cyrillic-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/inter-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/styles/tokens.css" />
+    <link rel="stylesheet" href="/styles/base.css" />
+    <link rel="stylesheet" href="/styles/app.css" />
+    <script type="importmap">
+      { "imports": { "preact": "/vendor/preact.js", "preact/hooks": "/vendor/preact-hooks.js", "htm": "/vendor/htm.js" } }
+    </script>
+    <script type="module" src="/js/main.js"></script>
   </head>
   <body>
-    <div id="app"><div class="initial-load">Подключение к диспетчерской…</div></div>
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <a class="skip-link" href="#main">К основному содержимому</a>
+    <div id="root"><div class="boot">Подключение к диспетчерской…</div></div>
+    <noscript><p class="boot">Для работы Автодиспетчера нужен JavaScript.</p></noscript>
   </body>
 </html>

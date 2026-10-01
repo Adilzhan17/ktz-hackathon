@@ -137,7 +137,7 @@ export function snapshot(state) {
   const groups = state.groups.map(g => groupView(state, g, plan)).sort((a, b) => (a.slackMinutes ?? Infinity) - (b.slackMinutes ?? Infinity) || a.id.localeCompare(b.id));
   const trains = state.trains.map(t => ({ ...t, direction: directionOf(t), forecast: plan.byTrain[t.number].forecast, delay: plan.byTrain[t.number].delay }));
   const { byTrain, ...dispatch } = plan;
-  return { ...state, trains, stations, groups, cargoNames, priorityNames: PRIORITY_NAMES,
+  return { ...state, baseTime: BASE_TIME, trains, stations, groups, cargoNames, priorityNames: PRIORITY_NAMES,
     dispatch: { ...dispatch, closedSegment: CLOSED_SEGMENT, selected: dispatch.selectedId, approved: state.planApproved } };
 }
 

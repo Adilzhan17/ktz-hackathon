@@ -8,7 +8,7 @@
     "start": "node server/index.js",
     "test": "node --test test/*.test.js",
     "test:e2e": "playwright test",
-    "check": "node --check server/index.js && node --check server/model.js && node --check public/app.js"
+    "check": "node --check server/index.js && node --check server/model.js && node --check server/dispatch.js && for f in public/js/*.js; do node --check $f || exit 1; done"
   },
   "engines": {
     "node": ">=22"

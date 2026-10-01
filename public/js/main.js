@@ -1,0 +1,86 @@
+import { render } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
+import { html, Icon, time, dateLong } from './lib.js';
+import { app, useApp, connect, act, href } from './store.js';
+import { Button, Dialog, Toasts } from './ui.js';
+import { Overview, Trains, Stations } from './pages.js';
+import { StationPage } from './station.js';
+import { LogPage } from './log.js';
+
+const NAV = [
+  { page: 'overview', path: '/', label: 'Обстановка', icon: 'chart-gantt' },
+  { page: 'trains', path: '/trains', label: 'Поезда', icon: 'train-front' },
+  { page: 'stations', path: '/stations', label: 'Станции', icon: 'building-2', also: ['station'] },
+  { page: 'log', path: '/log', label: 'Журнал', icon: 'list-checks' },
+];
+const TITLES = { overview: 'Обстановка', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал' };
+
+function Nav({ page, onAbout }) {
+  return html`<nav class="nav" aria-label="Основное меню">
+    <a class="brand" href=${href('/')} aria-label="Автодиспетчер — на главную">
+      <img src="/assets/ktz-emblem.png" alt="" width="40" height="40" />
+      <span><strong>Автодиспетчер</strong><small>Поездной диспетчер · ГИД</small></span>
+    </a>
+    <ul>${NAV.map(n => html`<li key=${n.page}><a href=${href(n.path)} class=${page === n.page || n.also?.includes(page) ? 'on' : ''}
+      aria-current=${page === n.page || n.also?.includes(page) ? 'page' : undefined}><${Icon} name=${n.icon} size=${19} /><span>${n.label}</span></a></li>`)}</ul>
+    <div class="nav-foot">
+      <img class="wordmark" src="/assets/ktz-wordmark.png" alt="Қазақстан темір жолы" />
+      <button type="button" class="nav-link" onClick=${onAbout}><${Icon} name="info" size=${18} /><span>О системе</span></button>
+    </div>
+  </nav>`;
+}
+
+function Topbar({ data, onReset }) {
+  const dis = !app.online || app.busy;
+  const step = m => act({ type: 'advance', minutes: m });
+  return html`<header class="topbar">
+    <div class="clock" aria-label="Время модели">
+      <${Icon} name="clock" size=${18} />
+      <div><strong class="num">${time(data.now)}</strong><small>${dateLong(data.now)} · модельное время</small></div>
+    </div>
+    <div class="btn-group" role="group" aria-label="Продвинуть время модели">
+      ${[[15, '+15 мин'], [30, '+30 мин'], [60, '+1 час']].map(([m, l]) => html`<${Button} key=${m} size="sm" variant="secondary" disabled=${dis} reason=${app.online ? 'Выполняется действие' : 'Нет соединения с сервером'} onClick=${() => step(m)}>${l}</${Button}>`)}
+    </div>
+    <span class=${`conn ${app.online ? 'ok' : 'off'}`} role="status"><i></i>${app.online ? 'На связи' : 'Нет связи'}</span>
+    <${Button} variant="ghost" size="sm" icon="rotate-ccw" label="Начать смену заново" title="Начать смену заново" onClick=${onReset} />
+  </header>`;
+}
+
+function App() {
+  useApp();
+  const { data, route } = app;
+  const [dialog, setDialog] = useState(null);
+  useEffect(() => { document.title = `${TITLES[route.page] || 'Автодиспетчер'} — Автодиспетчер КТЖ`; }, [route.page]);
+  if (!data) {
+    return html`<div class="boot" role="status">${app.failed ? html`<div class="boot-error"><h1>Не удалось подключиться к серверу</h1><p>Соединение восстановится автоматически. Если страница не оживает, перезапустите сервер.</p></div>` : 'Подключение к диспетчерской…'}</div>`;
+  }
+  const page = {
+    overview: html`<${Overview} data=${data} />`,
+    trains: html`<${Trains} data=${data} />`,
+    stations: html`<${Stations} data=${data} />`,
+    station: html`<${StationPage} data=${data} params=${route.params} />`,
+    log: html`<${LogPage} data=${data} />`,
+  }[route.page];
+  return html`<div class="shell">
+    <${Nav} page=${route.page} onAbout=${() => setDialog('about')} />
+    <div class="workspace">
+      <${Topbar} data=${data} onReset=${() => setDialog('reset')} />
+      ${!app.online && html`<div class="offline" role="alert"><${Icon} name="wifi-off" size=${18} /> Нет соединения с сервером. Действия временно недоступны — подключаемся заново…</div>`}
+      <main id="main" tabindex="-1">${page}</main>
+      <footer class="foot"><span>Помощник диспетчера. Решение принимает поездной диспетчер.</span><span>Учебная модель: данные условные, система не заменяет СЦБ и сертифицированные системы безопасности.</span></footer>
+    </div>
+    <${Toasts} />
+    <${Dialog} open=${dialog === 'reset'} onClose=${() => setDialog(null)} title="Начать смену заново?"
+      actions=${html`<${Button} onClick=${() => setDialog(null)}>Отмена</${Button}><${Button} variant="danger" onClick=${async () => { setDialog(null); await act({ type: 'reset' }); }}>Сбросить смену</${Button}>`}>
+      <p>Все операции, резервы, ограничения и события будут сброшены. Это общее состояние для всех, кто открыл систему.</p>
+    </${Dialog}>
+    <${Dialog} open=${dialog === 'about'} onClose=${() => setDialog(null)} title="О системе">
+      <p>Автодиспетчер помогает поездному диспетчеру в нестандартных ситуациях: закрытие пути после схода, движение по неправильному пути, ограничения скорости после ремонта.</p>
+      <p>Система находит конфликты встречных поездов, считает несколько вариантов пропуска с учётом приоритетов, предлагает лучший и пересчитывает прогноз после подтверждения. Об опоздании пассажирских поездов она сообщает пассажирам.</p>
+      <p><strong>Границы.</strong> Все данные условные. Интервальное регулирование, стрелочные маршруты и сигналы не моделируются; решение остаётся за диспетчером.</p>
+    </${Dialog}>
+  </div>`;
+}
+
+connect();
+render(html`<${App} />`, document.getElementById('root'));
