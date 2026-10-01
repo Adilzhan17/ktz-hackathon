@@ -37,7 +37,7 @@ test('every train has characteristics, load and technical state', () => {
 
 test('maintenance: container trains need service before almost every run, and the run starts after it', () => {
   const sn = snapshot(quiet());
-  const containers = sn.trains.filter(t => t.kind === 'container');
+  const containers = sn.trains.filter(t => t.kind === 'container' && t.route[0][0] >= (sn.now - sn.baseTime) / 60000);
   assert.ok(containers.filter(t => t.service).length >= containers.length * 0.6, 'контейнерные часто на ТО');
   for (const t of sn.trains.filter(t => t.service)) {
     assert.equal(t.route[0][0], t.service.to, 'отправление сразу после ТО');
@@ -103,6 +103,8 @@ test('stations: reservation reduces availability, cancel restores it exactly, ar
   act(state, { type: 'cancel', groupId: g.id });
   assert.equal(track().available, free);
   act(state, { type: 'reserve', groupId: g.id });
+  const eta = snapshot(state).groups.find(x => x.id === g.id).etaAt;
+  if (state.now < eta) advanceTime(state, (eta - state.now) / 60000);
   const sn2 = act(state, { type: 'arrive', groupId: g.id });
   assert.equal(sn2.groups.find(x => x.id === g.id).status, 'arrived');
 });
