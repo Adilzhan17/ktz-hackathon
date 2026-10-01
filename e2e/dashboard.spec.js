@@ -99,7 +99,7 @@ test('trains page: filter, sort, show on Gantt', async ({ page }) => {
 
 test('station list, deep link and unknown station', async ({ page }) => {
   await page.goto('/#/stations');
-  await page.getByRole('link', { name: /Майтак/ }).click();
+  await page.getByRole('link', { name: /Мойынты/ }).click();
   await expect(page).toHaveURL(/#\/station\/E/);
   await page.goto('/#/station/ZZ');
   await expect(page.getByText('Такой станции нет')).toBeVisible();
@@ -207,8 +207,8 @@ test('quick search navigates without changing the shared shift and restores focu
 test('live map opens a station and mobile overflow menu preserves secondary routes', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('.m-station a')).toHaveCount(10);
-  await page.getByRole('link', { name: /^Станция Майтак,/ }).click();
-  await expect(page.getByRole('heading', { name: 'Станция Майтак' })).toBeVisible();
+  await page.getByRole('link', { name: /^Станция Мойынты,/ }).click();
+  await expect(page.getByRole('heading', { name: 'Станция Мойынты' })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('.mobile-more summary').click();
   await page.locator('.more-links').getByRole('link', { name: 'Журнал', exact: true }).click();

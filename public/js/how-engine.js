@@ -221,10 +221,10 @@ const LIFE = [
 export function StationLifecycle() {
   const pl = usePlayer(LIFE.length, 3600);
   const cls = LIFE[pl.i].cls;
-  const [maytak, setMaytak] = useState(1);
+  const [moyynty, setMoyynty] = useState(1);
   const [karaganda, setKaraganda] = useState(4);
   const slack = days => Math.round(days * 24 * 60 - 180 - 30);
-  const first = slack(maytak) <= slack(karaganda) ? 'Майтак' : 'Караганда';
+  const first = slack(moyynty) <= slack(karaganda) ? 'Мойынты' : 'Караганда';
   return html`<div class="demo station-demo">
     <div class="life">
       <div class="track-viz" role="img" aria-label=${`Путь станции: ${LIFE[pl.i].title}`}>
@@ -235,7 +235,7 @@ export function StationLifecycle() {
     <div class="queue">
       <h3>Кого принимать первым?</h3>
       <p class="muted">Две группы идут на одну станцию. Двигайте ползунки: первой выбирается та, у которой меньше запас до конца срока доставки.</p>
-      ${[['Майтак', maytak, setMaytak], ['Караганда', karaganda, setKaraganda]].map(([n, v, set]) => html`<label class=${`q-row ${first === n ? 'win' : ''}`} key=${n}>
+      ${[['Мойынты', moyynty, setMoyynty], ['Караганда', karaganda, setKaraganda]].map(([n, v, set]) => html`<label class=${`q-row ${first === n ? 'win' : ''}`} key=${n}>
         <span class="q-name">${n}${first === n && html` <${Badge} tone="accent" icon="zap">первой</${Badge}>`}</span>
         <input type="range" min="1" max="6" step="0.5" value=${v} onInput=${e => set(Number(e.target.value))} aria-label=${`Остаток срока доставки: ${n}, суток`} />
         <span class="num">${v} сут · запас ${duration(slack(v))}</span></label>`)}

@@ -104,7 +104,7 @@ function FactorArt({ id }) {
     <g class="b"><rect x="90" y="52" width="110" height="18" rx="6" class="b-ink"/><text x="98" y="65">← №3116</text></g>
     <g class="flag"><circle cx="110" cy="48" r="9" class="clash-core"/></g></svg>`;
   if (id === 'deadline') return html`<svg viewBox="0 0 220 96" aria-hidden="true" class="art art-deadline">
-    <text x="8" y="18" class="mut">Майтак · 1 сутки</text><rect x="8" y="24" width="200" height="12" rx="6" class="track"/><rect x="8" y="24" width="200" height="12" rx="6" class="burn short"/>
+    <text x="8" y="18" class="mut">Мойынты · 1 сутки</text><rect x="8" y="24" width="200" height="12" rx="6" class="track"/><rect x="8" y="24" width="200" height="12" rx="6" class="burn short"/>
     <text x="8" y="62" class="mut">Караганда · 4 суток</text><rect x="8" y="68" width="200" height="12" rx="6" class="track"/><rect x="8" y="68" width="200" height="12" rx="6" class="burn long"/></svg>`;
   return html`<svg viewBox="0 0 220 96" aria-hidden="true" class="art art-cap">
     ${Array.from({ length: 10 }, (_, k) => html`<rect key=${k} x=${8 + k * 20.5} y="30" width="17" height="30" rx="4" class=${`wag w${k}`}/>`)}
