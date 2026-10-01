@@ -61,6 +61,17 @@
 .hold rect { fill: #fff; stroke: var(--danger); }
 .hold text { font-size: 12px; font-weight: 700; fill: var(--danger); }
 
+/* --- цепочка решения --- */
+.model-flow { overflow: hidden; }
+.model-diagram { position: relative; display: grid; grid-template-columns: repeat(6, minmax(100px, 1fr)); gap: 8px; padding: 20px 10px 10px; isolation: isolate; }
+.model-diagram::before { content: ""; position: absolute; left: 8%; right: 8%; top: 48px; height: 3px; background: var(--line-strong); z-index: -1; }
+.model-node { display: grid; justify-items: center; gap: 6px; text-align: center; color: var(--text-3); transition: color .35s ease, transform .35s ease; }
+.model-icon { display: grid; place-items: center; width: 52px; height: 52px; border: 3px solid var(--line-strong); border-radius: 50%; background: var(--surface); color: var(--text-3); transition: all .35s ease; }
+.model-node small { font-size: 11px; font-weight: 650; max-width: 11ch; }.model-node.done, .model-node.on { color: var(--accent-ink); }.model-node.done .model-icon { border-color: var(--accent-line); background: var(--accent-bg); }
+.model-node.on { transform: translateY(-6px); }.model-node.on .model-icon { border-color: var(--accent); background: var(--accent); color: #fff; box-shadow: 0 0 0 7px rgb(0 169 216 / 14%); }
+.model-pulse { position: absolute; top: 43px; left: calc(8% + var(--step) * 16.8%); width: 14px; height: 14px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 8px rgb(0 169 216 / 16%); transition: left .7s cubic-bezier(.2,.8,.2,1); z-index: -1; }
+.model-rule { display: flex; gap: 9px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius); background: var(--accent-bg); color: var(--accent-ink); font-size: var(--text-sm); }.model-rule .icon { flex: none; }
+
 /* --- факторы --- */
 .factors { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
 .factor { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-l); box-shadow: var(--shadow-1); overflow: hidden; display: grid; align-content: start; }
@@ -211,8 +222,18 @@
   .score-row .score-bar, .sp-row .score-bar { grid-column: 1 / -1; order: 3; }
   .demo { padding: 14px; }
   .how-hero { padding: 20px; }
+  .model-diagram { grid-template-columns: repeat(3, 1fr); row-gap: 22px; padding-inline: 0; }
+  .model-diagram::before, .model-pulse { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .art *, .clash-ring, .score-bar i, .push, .flow li, .stage-visual, .btn.pressed, .spin { animation: none !important; }
-  .problem .train, .lanes .bar, .cell { transition: none; }
+  .problem .train, .lanes .bar, .cell, .model-node, .model-icon, .model-pulse { transition: none; }
+}
+
+@media print {
+  .how-layout { display: block; }.how-toc, .player, .how-cta, button { display: none !important; }
+  .how-body { display: block; }.how-hero, .how-section { break-after: page; page-break-after: always; margin-bottom: 18mm; box-shadow: none; }
+  .how-section:last-child { break-after: auto; page-break-after: auto; }.demo { box-shadow: none; break-inside: avoid; }
+  .how-hero { min-height: 160mm; align-content: center; }.how-section > header h2 { font-size: 26pt; }.how-section > header .lead { font-size: 14pt; }
+  .model-pulse, .clash-ring, .art *, .push, .flow li { animation: none !important; }
 }

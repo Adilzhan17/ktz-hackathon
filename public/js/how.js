@@ -2,11 +2,12 @@ import { useEffect, useState } from 'preact/hooks';
 import { html, Icon } from './lib.js';
 import { go } from './store.js';
 import { Button, PageHeader } from './ui.js';
-import { ProblemDemo, Factors } from './how-problem.js';
+import { ProblemDemo, Factors, ModelFlow } from './how-problem.js';
 import { AlgorithmStepper, Sandbox, Cases, StationLifecycle } from './how-engine.js';
 
 const SECTIONS = [
   { id: 'problem', icon: 'siren', title: 'Проблема' },
+  { id: 'model', icon: 'workflow', title: 'Цепочка решения' },
   { id: 'factors', icon: 'sliders-horizontal', title: 'Факторы' },
   { id: 'algorithm', icon: 'split', title: 'Как мы решаем' },
   { id: 'cases', icon: 'book-open', title: 'Примеры' },
@@ -34,7 +35,7 @@ const Section = ({ id, icon, eyebrow, title, lead, children }) => html`<section 
 export function HowPage() {
   const active = useScrollSpy(SECTIONS.map(s => s.id));
   const jump = (e, id) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  return html`<${PageHeader} title="Как это работает" subtitle="Задача, факторы, алгоритм и живые примеры. Всё на этой странице можно нажимать." />
+  return html`<${PageHeader} title="Как это работает" subtitle="Задача, факторы, алгоритм и живые примеры. Всё на этой странице можно нажимать." actions=${html`<${Button} icon="file-down" onClick=${() => window.print()}>Экспортировать PDF</${Button>}`} />
     <div class="how-layout">
       <nav class="how-toc" aria-label="Разделы страницы"><ul>${SECTIONS.map(s => html`<li key=${s.id}><a href=${`#${s.id}`} class=${active === s.id ? 'on' : ''} aria-current=${active === s.id ? 'true' : undefined} onClick=${e => jump(e, s.id)}><${Icon} name=${s.icon} size=${16} />${s.title}</a></li>`)}</ul></nav>
       <div class="how-body">
@@ -52,6 +53,10 @@ export function HowPage() {
         <${Section} id="problem" icon="siren" eyebrow="Задача" title="Что происходит, когда путь закрыт"
           lead="Участок двухпутный: у каждого направления свой путь. Когда один путь выходит из строя, двум направлениям приходится делить оставшийся, и без правил очерёдности поезда начинают мешать друг другу.">
           <${ProblemDemo} /></${Section}>
+
+        <${Section} id="model" icon="workflow" eyebrow="Логика" title="Как событие превращается в решение"
+          lead="Это не чёрный ящик: показано, какие данные входят в расчёт, где возникают варианты и в какой момент решение возвращается диспетчеру.">
+          <${ModelFlow} /></${Section}>
 
         <${Section} id="factors" icon="sliders-horizontal" eyebrow="Данные" title="Какие факторы учитывает система"
           lead="Шесть вещей определяют, кто пойдёт первым и сколько он потеряет. Каждая карточка показывает один фактор в движении.">

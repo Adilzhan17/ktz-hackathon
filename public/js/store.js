@@ -81,9 +81,7 @@ app.route = parseHash();
 // ---- связь с сервером ----
 export function connect() {
   const source = new EventSource('/api/events');
-  source.onopen = () => update({ online: true, failed: false });
-  source.onmessage = e => {
-    const next = JSON.parse(e.data);
+  const receive = next => {
     setClock(next);
     const same = app.data && next.revision === app.data.revision && next.now === app.data.now;
     const first = !app.data;
@@ -91,8 +89,16 @@ export function connect() {
     // ссылка вида #/?train=153 выбирает поезд, как только пришли данные
     if (first && app.route.params.train && next.trains.some(t => t.number === app.route.params.train)) updateUi({ selectedTrain: app.route.params.train });
   };
+  source.onopen = () => update({ online: true, failed: false });
+  source.onmessage = e => { try { receive(JSON.parse(e.data)); } catch { update({ online: false, failed: !app.data }); } };
   source.addEventListener('clock', e => setClock(JSON.parse(e.data)));
   source.onerror = () => update({ online: false, failed: !app.data });
+  // SSE иногда буферизуется мобильным браузером или промежуточным прокси. Первичный
+  // снимок через обычный GET гарантирует, что экран не останется на «Подключение…».
+  fetch('/api/state', { cache: 'no-store' })
+    .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+    .then(receive)
+    .catch(() => { if (!app.data) update({ failed: true }); });
 }
 
 export async function act(payload) {
