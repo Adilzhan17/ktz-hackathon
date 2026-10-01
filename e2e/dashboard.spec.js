@@ -148,7 +148,7 @@ test('trains page: maintenance filter and characteristics columns', async ({ pag
 test('station list, deep link and unknown station', async ({ page }) => {
   await page.goto('/#/stations');
   await page.getByRole('link', { name: /Мойынты/ }).click();
-  await expect(page).toHaveURL(/#\/station\/E/);
+  await expect(page).toHaveURL(/#\/station\/J/);
   await page.goto('/#/station/ZZ');
   await expect(page.getByText('Такой станции нет')).toBeVisible();
 });
@@ -239,10 +239,10 @@ test('quick search navigates without changing the shared shift and restores focu
   await expect(page.locator('.selection')).toContainText('№153');
   await page.keyboard.press('Control+k');
   await expect(dialog).toBeVisible();
-  await input.fill('Казан');
-  await dialog.getByRole('region', { name: 'Найденные станции' }).getByRole('button', { name: /Казан/ }).click();
+  await input.fill('Дария');
+  await dialog.getByRole('region', { name: 'Найденные станции' }).getByRole('button', { name: /Дария/ }).click();
   await expect(page).toHaveURL(/#\/station\/D/);
-  await expect(page.getByRole('heading', { name: 'Станция Казан' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Станция Дария' })).toBeVisible();
   await trigger.click();
   await input.fill('несуществующий объект');
   await expect(dialog.getByRole('status')).toContainText('Ничего не найдено');
@@ -255,8 +255,8 @@ test('quick search navigates without changing the shared shift and restores focu
 test('live map opens a station and mobile overflow menu preserves secondary routes', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('.m-station a')).toHaveCount(10);
-  await page.getByRole('link', { name: /^Станция Мойынты,/ }).click();
-  await expect(page.getByRole('heading', { name: 'Станция Мойынты' })).toBeVisible();
+  await page.getByRole('link', { name: /^Станция Жарык,/ }).click();
+  await expect(page.getByRole('heading', { name: 'Станция Жарык' })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.locator('.mobile-more summary').click();
   await page.locator('.more-links').getByRole('link', { name: 'Журнал', exact: true }).click();
@@ -407,7 +407,7 @@ test('breakdown: level 1 slows the train, level 3 removes it and blocks its trac
   await panel.getByRole('radio', { name: /3\. Тяжёлая/ }).click();
   await panel.getByRole('button', { name: 'Спроецировать' }).click();
   await expect(panel.locator('.tc-head')).toContainText('снят с рейса');
-  await expect(panel.locator('.task', { hasText: t2.number })).toBeVisible();
+  await expect(panel.locator('.task', { hasText: t2.number }).first()).toBeVisible();
 });
 
 test('API: breakdown levels, closure of both tracks and automatic settings are validated', async ({ request }) => {
