@@ -25,7 +25,7 @@ export const KIND_NAMES = { electric: 'электровозы', mainDiesel: 'м�
 const KIND_LETTER = { electric: 'Э', mainDiesel: 'Т', shunting: 'М' };
 
 /** Слои сети на карте Leaflet. Возвращает управляющий объект. */
-export function attachNetwork(L, map) {
+export function attachNetwork(L, map, { all = false } = {}) {
   const canvas = L.canvas({ padding: 0.4 });
   const layers = { stations: L.layerGroup(), halts: L.layerGroup(), depots: L.layerGroup() };
   const markers = { stations: [], halts: [] };
@@ -37,7 +37,7 @@ export function attachNetwork(L, map) {
     return `<div class="geo-net-popup"><strong>${esc(name)}</strong>${kk ? `<span>${esc(kk)}</span>` : ''}<small>${kind === 'halt' ? 'Остановочный пункт или разъезд' : 'Станция'} · ${lat.toFixed(3)}, ${lon.toFixed(3)}</small>
       <a href="https://www.openstreetmap.org/node/${id}" target="_blank" rel="noopener">Объект в OpenStreetMap</a></div>`;
   };
-  const build = kind => (kind === 'station' ? data.net.stations : data.net.halts).filter(r => !corridorNodes.has(r[0])).map(rec => {
+  const build = kind => (kind === 'station' ? data.net.stations : data.net.halts).filter(r => all || !corridorNodes.has(r[0])).map(rec => {
     const station = kind === 'station';
     const m = L.circleMarker([rec[2], rec[3]], { renderer: canvas, radius: station ? 5 : 3.2, weight: station ? 1.6 : 1, color: '#fff',
       fillColor: station ? '#00566f' : '#6f8594', fillOpacity: 0.95 });
@@ -103,7 +103,7 @@ export function attachNetwork(L, map) {
   });
 
   const controller = {
-    ready: false, onReady: null, counts() { return data ? { stations: markers.stations.length + corridorNodes.size, halts: markers.halts.length, depots: data.fleet.depots.length } : null; },
+    ready: false, onReady: null, counts() { return data ? { stations: markers.stations.length + (all ? 0 : corridorNodes.size), halts: markers.halts.length, depots: data.fleet.depots.length } : null; },
     set(kind, on) {
       const layer = layers[kind];
       if (on && !map.hasLayer(layer)) layer.addTo(map);

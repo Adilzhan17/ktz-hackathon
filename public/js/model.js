@@ -70,54 +70,15 @@ function NetworkDecisions() {
     </section>`;
 }
 
-function CorridorDecisions({ data }) {
-  const { dispatch } = data;
-  const [query, setQuery] = useState('');
-  const [dir, setDir] = useState('all');
-  const [station, setStation] = useState('all');
-  const selected = dispatch.variants.find(v => v.id === dispatch.selected);
-  const best = Math.max(...dispatch.variants.map(v => v.metrics.weighted), 1);
-  const order = (selected?.order || []).filter(o => (dir === 'all' || o.dir === dir) && (!query || `${o.train} ${o.label}`.toLowerCase().includes(query.toLowerCase())));
-  const segs = data.stations.slice(0, -1).map((s, i) => ({ i, label: `${s.name} — ${data.stations[i + 1].name}` }));
-  const closures = dispatch.closures.filter(c => station === 'all' || c.segment === Number(station));
-  return html`
-    <section class="panel">
-      <div class="panel-head"><div><h2>Выбор варианта пропуска на участке</h2><small>Три правила очерёдности применяются к одним и тем же закрытиям, побеждает вариант с наименьшей взвешенной задержкой (пассажирские ×10, контейнерные ×2, прочие ×1).</small></div>
-        <${Button} icon="scale" onClick=${() => go('/decisions')}>Подтвердить на панели</${Button}></div>
-      <div class="filter-row"><label class="filter-select"><span class="sr-only">Перегон</span><select value=${station} onChange=${e => setStation(e.target.value)} aria-label="Перегон">
-        <option value="all">Все перегоны</option>${segs.map(s => html`<option key=${s.i} value=${s.i}>${s.label}</option>`)}</select></label></div>
-      ${dispatch.variants.length ? html`
-        <ul class="closure-list">${closures.map(c => html`<li key=${c.id}><${Icon} name="siren" size=${16} /><span><strong>${data.stations[c.segment].name} — ${data.stations[c.segment + 1].name}</strong>: закрыт ${c.track === 'both' ? 'оба пути' : c.track === 'odd' ? 'нечётный путь' : 'чётный путь'}${c.until == null ? ' до отмены' : ` до ${clockAt(data, c.until)}`}</span></li>`)}
-          ${!closures.length && html`<li class="muted">На выбранном перегоне закрытий нет.</li>`}</ul>
-        <table class="opt-table"><thead><tr><th scope="col">Вариант</th><th scope="col" class="num">Пассажирские, мин</th><th scope="col" class="num">Все поезда, мин</th><th scope="col" class="num">Задержано</th><th scope="col" class="num">Взвешенная</th><th scope="col"><span class="sr-only">Шкала</span></th></tr></thead>
-          <tbody>${dispatch.variants.map(v => html`<tr key=${v.id} class=${v.recommended ? 'pick' : ''}>
-            <td><strong>${v.name}</strong> ${v.recommended && html`<${Badge} tone="accent" icon="zap">Рекомендует модель</${Badge}>`}${dispatch.selected === v.id && html` <${Badge} icon="check">Выбран</${Badge}>`}<br /><small class="muted">${v.description}</small></td>
-            <td class="num">${v.metrics.passenger}</td><td class="num">${v.metrics.total}</td><td class="num">${v.metrics.delayedTrains}</td><td class="num"><strong>${v.metrics.weighted}</strong></td>
-            <td style="width:110px"><i class="cost-bar" style=${`width:${Math.max(4, v.metrics.weighted / best * 100)}%`}></i></td></tr>`)}</tbody></table>
-        <p class="model-why"><${Icon} name="lightbulb" size=${16} /><span><strong>Почему выбран этот вариант:</strong> ${dispatch.why}</span></p>
-        <h3>Очерёдность по выбранному варианту «${selected.name}»</h3>
-        <div class="filter-row"><label class="search"><${Icon} name="search" size=${16} /><span class="sr-only">Поиск поезда в очерёдности</span>
-          <input type="search" placeholder="Номер поезда" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
-          <${Segmented} label="Направление" value=${dir} onChange=${setDir} options=${[{ value: 'all', label: 'Оба' }, { value: 'even', label: 'Чётное' }, { value: 'odd', label: 'Нечётное' }]} /></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th scope="col">№ в очереди</th><th scope="col">Поезд</th><th scope="col">Приоритет</th><th scope="col">Направление</th><th scope="col" class="num">Задержка</th><th scope="col">Почему здесь</th></tr></thead>
-          <tbody>${order.slice(0, 40).map((o, i) => html`<tr key=${o.train}><td>${i + 1}</td><td><strong>${o.train}</strong> ${o.label}</td><td>${o.priority === 1 ? 'пассажирский' : o.priority === 2 ? 'транзит/контейнер' : 'сборный'}</td>
-            <td>${o.dir === 'even' ? 'чётное' : 'нечётное'}</td><td class=${`num ${o.delay > 0 ? 'bad' : ''}`}>${o.delay > 0 ? `+${o.delay} мин` : 'по графику'}</td>
-            <td class="muted">${o.priority === 1 ? 'приоритет пассажирского: проходит первым' : o.delay > 0 ? 'уступает более приоритетным на единственном пути' : 'не мешает приоритетным поездам'}</td></tr>`)}
-            ${!order.length && html`<tr><td colspan="6"><${Empty} icon="search" title="Ничего не найдено">Измените фильтры.</${Empty}></td></tr>`}</tbody></table></div>`
-        : html`<${Empty} icon="circle-check" title="Закрытий путей нет">Пока нет закрытий и поломок, выбирать нечего: поезда идут по графику, очерёдность — по времени подхода. Создайте событие на панели решений, и модель сравнит три варианта пропуска.</${Empty}>
-          <${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`}
-    </section>`;
-}
-
-export function ModelPage({ data }) {
+export function ModelPage() {
   const [scope, setScope] = useState('network');
-  return html`<${PageHeader} title="Решения модели" subtitle="Что модель выбирает, по каким правилам и почему это выгоднее: по всей сети и на детальном участке"
+  return html`<${PageHeader} title="Решения модели" subtitle="Что модель выбирает, по каким правилам и почему это выгоднее: по всей сети КТЖ"
       actions=${html`<${Button} icon="book-open" onClick=${() => go('/how')}>Как это работает</${Button}>`} />
     <${Tabs} label="Охват решений" value=${scope} idPrefix="md" onChange=${setScope}
-      tabs=${[{ value: 'network', label: 'Вся сеть' }, { value: 'corridor', label: 'Участок Караганда — Мойынты' }, { value: 'journal', label: 'Журнал решений' }]} />
+      tabs=${[{ value: 'network', label: 'Вся сеть' }, { value: 'journal', label: 'Журнал решений' }]} />
     <div id="md-panel" role="tabpanel" aria-labelledby=${`md-${scope}`} class="tab-panel">
-      ${scope === 'network' ? html`<${NetworkDecisions} />` : scope === 'corridor' ? html`<${CorridorDecisions} data=${data} />`
-        : html`<section class="panel"><div class="panel-head"><div><h2>Журнал принятых решений</h2><small>Что модель решила прямо сейчас и недавно: принять, отправить, пропустить приоритетный поезд, сменить бригаду, задержать, устранить неисправность. Лента идёт в реальном времени.</small></div></div><${EventFeed} data=${data} /></section>`}
-      <p class="note"><${Icon} name="info" size=${15} /> Для сети расчёт упрощённый: расписание синтетическое, положение поездов берётся из модели движения, а решения по очерёдности оценивает та же весовая схема, что и на участке. Полные варианты пропуска с подтверждением работают на участке Караганда — Мойынты.</p>
+      ${scope === 'network' ? html`<${NetworkDecisions} />`
+        : html`<section class="panel"><div class="panel-head"><div><h2>Журнал принятых решений</h2><small>Что модель решила прямо сейчас и недавно: принять, отправить, пропустить приоритетный поезд, сменить бригаду, задержать, устранить неисправность. Лента идёт в реальном времени.</small></div></div><${EventFeed} /></section>`}
+      <p class="note"><${Icon} name="info" size=${15} /> Для сети расчёт упрощённый: расписание синтетическое, положение поездов берётся из модели движения, а решения по очерёдности оценивает та же весовая схема, что и на участке. </p>
     </div>`;
 }

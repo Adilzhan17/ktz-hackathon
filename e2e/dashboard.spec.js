@@ -49,7 +49,7 @@ test('closure: conflicts, three variants, choosing and confirming a plan notifie
   await expect(page.locator('.notices li')).toHaveCount(0);       // до подтверждения пассажиров не тревожим
   await page.getByRole('button', { name: /Подтвердить вариант/ }).click();
   await expect(page.getByText('План подтверждён')).toBeVisible();
-  await page.getByRole('link', { name: 'Обстановка' }).click();
+  await page.getByRole('link', { name: 'Диспетчерская панель' }).click();
   await expect(page.getByText('План подтверждён:')).toBeVisible();
   await page.goto('/#/decisions');
   await page.locator('.restrictions li', { hasText: 'D–E' }).getByRole('button', { name: 'Снять' }).click();
@@ -79,11 +79,11 @@ test('speed restriction is entered and lifted, delays appear in KPIs', async ({ 
   await page.getByLabel('Скорость, км/ч').selectOption('25');
   await page.getByRole('button', { name: 'Ввести', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Действующие и запланированные' })).toBeVisible();
-  await page.getByRole('link', { name: 'Обстановка' }).click();
+  await page.getByRole('link', { name: 'Диспетчерская панель' }).click();
   await expect(page.locator('.kpi', { hasText: 'Задержано поездов' })).not.toContainText('задержек нет');
   await page.goto('/#/decisions');
   await page.locator('.restrictions li', { hasText: '25 км/ч' }).getByRole('button', { name: 'Снять' }).click();
-  await page.getByRole('link', { name: 'Обстановка' }).click();
+  await page.getByRole('link', { name: 'Диспетчерская панель' }).click();
   await expect(page.locator('.kpi', { hasText: 'Задержано поездов' })).toContainText('задержек нет');
 });
 
@@ -122,36 +122,9 @@ test('keyboard focus survives an action (no full re-render)', async ({ page, req
   await expect(btn).toBeFocused();
 });
 
-test('trains page: filter, sort, show on the map', async ({ page, request }) => {
-  const s = await getState(request);
-  await page.goto('/#/trains');
-  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
-  await expect(page.locator('tbody tr')).toHaveCount(s.trains.length);
-  await page.getByRole('radio', { name: 'Пассажирские' }).click();
-  await expect(page.locator('tbody tr')).toHaveCount(s.trains.filter(t => t.category === 'passenger').length);
-  await page.getByRole('searchbox').fill('153');
-  await expect(page.locator('tbody tr')).toHaveCount(1);
-  await expect(page.locator('tbody tr')).toContainText(/KZ|ТЭП/);
-  await page.getByRole('button', { name: 'На схеме' }).click();
-  await expect(page).toHaveURL(/#\/overview/);
-  await expect(page.locator('.selection')).toContainText('№153');
-});
-
-test('trains page: maintenance filter and characteristics columns', async ({ page, request }) => {
-  const s = await getState(request);
-  const due = s.trains.filter(t => ['на ТО', 'ТО перед рейсом', 'скоро ТО'].includes(t.techState.status)).length;
-  await page.goto('/#/trains');
-  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
-  await page.getByRole('radio', { name: 'ТО', exact: true }).click();
-  await expect(page.locator('tbody tr')).toHaveCount(due);
-  await expect(page.getByRole('columnheader', { name: /ТО \/ состояние/ })).toBeVisible();
-});
-
 test('station list, deep link and unknown station', async ({ page }) => {
-  await page.goto('/#/stations');
-  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
-  await page.getByRole('link', { name: /Мойынты/ }).click();
-  await expect(page).toHaveURL(/#\/station\/J/);
+  await page.goto('/#/station/J');
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Мойынты');
   await page.goto('/#/station/ZZ');
   await expect(page.getByText('Такой станции нет')).toBeVisible();
 });
@@ -216,17 +189,6 @@ test('how-it-works page: animated demos, stepper, cases, sandbox does not touch 
   await sb.getByRole('button', { name: 'Подтвердить' }).click();
   await expect(sb.locator('.sandbox-kpis')).toContainText('уведомлений пассажирам');
   expect((await (await request.get('/api/state')).json()).blocked).toBe(false);
-});
-
-test('icons morph: sort chevron changes its path when direction flips', async ({ page }) => {
-  await page.goto('/#/trains');
-  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
-  const th = page.getByRole('columnheader', { name: /Опоздание/ });
-  const d = () => th.locator('svg path').getAttribute('d');
-  const before = await d();
-  await th.getByRole('button').click();
-  await page.waitForTimeout(900);
-  expect(await d()).not.toBe(before);
 });
 
 test('quick search navigates without changing the shared shift and restores focus', async ({ page, request }) => {
@@ -451,11 +413,6 @@ test('station cards and map agree on occupied wagons and the arrival queue', asy
   const data = await getState(request);
   const st = data.stations.find(x => x.id === g.stationId);
   const waiting = data.groups.filter(x => x.stationId === st.id && x.status !== 'arrived' && x.etaAt <= data.now).length;
-  await page.goto('/#/stations');
-  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
-  const card = page.locator(`[data-station="${st.id}"]`);
-  await expect(card.locator('.sc-occupancy')).toContainText(`${st.occupied} / ${st.capacity} ваг.`);
-  await expect(card.locator('.sc-stats > div').filter({ hasText: 'Ждут приёма' })).toContainText(`${waiting} гр.`);
   await page.goto('/#/overview');
   const station = page.locator('.m-station').filter({ has: page.getByRole('link', { name: new RegExp(`^Станция ${st.name},`) }) });
   await expect(station.locator('.m-load')).toHaveText(`${st.occupied} / ${st.capacity} ваг.`);
@@ -495,7 +452,7 @@ test('fleet page: search across all stations of Kazakhstan and open one on the m
   const row = page.locator('.station-list li', { hasText: 'Тараз' }).first();
   await expect(row).toBeVisible();
   await row.getByRole('button', { name: 'На карте' }).click();
-  await expect(page).toHaveURL(/#\/map/);
+  await expect(page).toHaveURL(/\/#\/?$/);
   await expect(page.locator('.net-chip', { hasText: 'Станции' })).toHaveAttribute('aria-pressed', 'true', { timeout: 10000 });
 });
 
@@ -542,13 +499,11 @@ test('network page: forced stops list, train card and fleet summary', async ({ p
     await page.locator('.net-train').getByRole('button', { name: 'Снять' }).click();
     await expect(page.locator('.net-train')).toHaveCount(0);
   }
-  await page.getByRole('button', { name: 'Открыть обстановку' }).click();
-  await expect(page).toHaveURL(/#\/overview/);
 });
 
 test('network lists: all trains, all stations, journal and model decisions have filters', async ({ page }) => {
   await page.goto('/#/trains');
-  await expect(page.getByRole('heading', { name: 'Поезда сети', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Поезда', level: 1, exact: true })).toBeVisible();
   await expect.poll(async () => Number((await page.locator('.mini-kpis strong').first().innerText()).replace(/\D/g, ''))).toBeGreaterThan(400);
   await page.getByRole('radio', { name: 'Пассажирские' }).click();
   await page.getByRole('searchbox').fill('Астана');
@@ -567,8 +522,6 @@ test('network lists: all trains, all stations, journal and model decisions have 
   await page.getByRole('radio', { name: 'Сократить' }).click();
   await page.getByRole('tab', { name: 'Журнал решений' }).click();
   await expect(page.locator('.timeline li').first()).toBeVisible();
-  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
-  await expect(page.getByRole('heading', { name: 'Выбор варианта пропуска на участке' })).toBeVisible();
 });
 
 test('network train card shows crew, locomotive, consist and technical characteristics', async ({ page }) => {

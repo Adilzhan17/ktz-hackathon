@@ -3,7 +3,6 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useLiveNow } from './store.js';
 import { useNetwork } from './geo-network.js';
 import { prepare, networkTrains, networkStats } from './network-sim.js';
-import { CORRIDOR } from '/engine/rail-corridor.js';
 
 let simLoading;
 export function useSim() {
@@ -12,16 +11,11 @@ export function useSim() {
   return sim;
 }
 
-// Поезда детальной модели участка рисуются отдельно, поэтому сетевые рядом с участком скрываем.
-const corridorCells = new Set();
-for (const seg of CORRIDOR.segments) for (const [lat, lon] of seg) for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) corridorCells.add(`${Math.floor(lat / 0.012) + di}:${Math.floor(lon / 0.012) + dj}`);
-export const inCorridor = (lat, lon) => corridorCells.has(`${Math.floor(lat / 0.012)}:${Math.floor(lon / 0.012)}`);
-
 /** Сколько поездов сейчас на сети (для строки состояния в шапке). */
 export function useNetworkTotals() {
   const sim = useSim();
   const now = useLiveNow(0.2);
-  return useMemo(() => (sim && !sim.error ? networkStats(networkTrains(sim, now, { exclude: inCorridor })) : null), [sim, Math.floor(now / 5000)]);
+  return useMemo(() => (sim && !sim.error ? networkStats(networkTrains(sim, now)) : null), [sim, Math.floor(now / 5000)]);
 }
 
 /** Все поезда сети; пересчитываются раз в refreshSec секунд. */
@@ -29,7 +23,7 @@ export function useNetworkTrains(refreshSec = 5) {
   const sim = useSim();
   const now = useLiveNow(1 / refreshSec);
   const slot = Math.floor(now / (refreshSec * 1000));
-  const trains = useMemo(() => (sim && !sim.error ? networkTrains(sim, now, { exclude: inCorridor }) : []), [sim, slot]);
+  const trains = useMemo(() => (sim && !sim.error ? networkTrains(sim, now) : []), [sim, slot]);
   return { sim, trains, now, loading: !sim, failed: Boolean(sim?.error) };
 }
 

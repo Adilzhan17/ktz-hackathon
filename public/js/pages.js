@@ -7,7 +7,6 @@ import { Gantt } from './gantt.js';
 import { TrackMap } from './trackmap.js';
 import { DispatcherPanel } from './panel.js';
 import { NetworkTrains, NetworkStations } from './network-lists.js';
-import { Tabs } from './ui.js';
 import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
 
 const stationName = (data, i) => data.stations[i].name;
@@ -25,7 +24,7 @@ export function Overview({ data }) {
   const broken = data.trains.filter(t => t.broken).length;
   return html`<${PageHeader} title="Оперативная обстановка"
       subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
-      actions=${html`<a class="btn btn-secondary" href=${href('/map')}><${Icon} name="map-pin" size=${17} />Карта участка</a><a class="btn btn-secondary" href=${href('/trains')}><${Icon} name="train-front" size=${17} />${data.trains.length} на участке</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
+      actions=${html`<a class="btn btn-secondary" href=${href('/map')}><${Icon} name="map-pin" size=${17} />Карта участка</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
     <section class="panel map-panel" aria-labelledby="map-title">
       <div class="panel-head"><div><h2 id="map-title">Схема участка в реальном времени</h2>
         <small>Время идёт в реальном ходе; поезда, ТО, вагоны и происшествия создаются сами. Сверху нечётный путь (←), снизу чётный (→).</small></div></div>
@@ -82,113 +81,12 @@ export function DecisionsPage({ data }) {
     </div>`;
 }
 
-const SORTS = {
-  number: t => Number(t.number), priority: t => t.priority, load: t => t.loadPct, cond: t => t.techState.conditionPct,
-  plan: t => t.route.at(-1)[0], forecast: t => t.forecast.at(-1)[0], delay: t => (t.delay === null ? 1e9 : t.delay),
-};
-const FILTERS = [{ value: 'all', label: 'Все' }, { value: 'late', label: 'Опаздывают' }, { value: 'service', label: 'ТО' }, { value: 'broken', label: 'Поломки' }];
-
-function CorridorTrains({ data, scopeTabs }) {
-  const [sort, setSort] = useState({ key: 'delay', dir: -1 });
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('all');
-  const { ui } = app;
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return data.trains
-      .filter(t => (ui.category === 'all' || t.category === ui.category)
-        && (filter === 'all' || (filter === 'late' && (t.delay > 0 || t.disabled)) || (filter === 'service' && ['на ТО', 'ТО перед рейсом', 'скоро ТО'].includes(t.techState.status)) || (filter === 'broken' && t.broken))
-        && (!q || `${t.number} ${t.label} ${t.loco.series} ${stationName(data, t.route[0][1])} ${stationName(data, t.route.at(-1)[1])}`.toLowerCase().includes(q)))
-      .sort((a, b) => (SORTS[sort.key](a) > SORTS[sort.key](b) ? 1 : SORTS[sort.key](a) < SORTS[sort.key](b) ? -1 : 0) * sort.dir || Number(a.number) - Number(b.number));
-  }, [data, ui.category, query, sort, filter]);
-  const th = (key, label) => html`<th scope="col" aria-sort=${sort.key === key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
-    <button type="button" class="th-btn" onClick=${() => setSort(s => ({ key, dir: s.key === key ? -s.dir : (key === 'delay' || key === 'load' ? -1 : 1) }))}>${label}
-      <${Icon} name=${sort.key === key ? (sort.dir > 0 ? 'chevron-up' : 'chevron-down') : 'arrow-up-down'} size=${13} /></button></th>`;
-  const show = t => { updateUi({ selectedTrain: t.number }); go('/overview'); };
-  const exportCsv = () => downloadCsv('trains.csv', [
-    ['Номер', 'Тип', 'Приоритет', 'Направление', 'Откуда', 'Куда', 'Вагонов', 'Локомотив', 'Загрузка, %', 'Масса, т', 'Состояние ТО', 'Тех. состояние, %', 'Прибытие по графику', 'Прогноз прибытия', 'Опоздание, мин'],
-    ...rows.map(t => [t.number, t.label, t.priority, DIRECTION[t.direction], stationName(data, t.route[0][1]), stationName(data, t.route.at(-1)[1]), t.wagons, `${t.loco.series} №${t.loco.number}`, t.loadPct, t.grossT, t.techState.status, t.techState.conditionPct, clockAt(data, t.route.at(-1)[0]), clockAt(data, t.forecast.at(-1)[0]), t.delay ?? 'снят с рейса'])]);
-  return html`<${PageHeader} title="Поезда участка" subtitle=${`${data.trains.length} поездов в расписании на ближайшие сутки · приоритет определяет очерёдность при конфликтах`}
-      actions=${html`<${Button} icon="download" onClick=${exportCsv}>Выгрузить CSV</${Button}>`} />
-    <section class="panel">
-      ${scopeTabs}
-      <div class="toolbar">
-        <label class="search"><${Icon} name="search" size=${16} /><span class="sr-only">Поиск поезда</span>
-          <input type="search" placeholder="Номер, тип, локомотив или станция" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
-        <div class="btn-row"><${Segmented} label="Категория" value=${ui.category} onChange=${v => updateUi({ category: v })}
-          options=${[{ value: 'all', label: 'Все' }, { value: 'passenger', label: 'Пассажирские' }, { value: 'freight', label: 'Грузовые' }, { value: 'container', label: 'Контейнерные' }]} />
-          <${Segmented} label="Состояние" value=${filter} onChange=${setFilter} options=${FILTERS} /></div>
-      </div>
-      <p class="note"><${Icon} name="info" size=${15} /> Приоритет: ${Object.entries(data.priorityNames).map(([k, v]) => `${k} — ${v.toLowerCase()}`).join('; ')}.</p>
-      <div class="table-wrap">
-        <table class="table responsive">
-          <thead><tr>${th('number', '№')}${th('priority', 'Тип')}<th scope="col">Маршрут</th><th scope="col">Локомотив</th>${th('load', 'Загрузка')}${th('cond', 'ТО / состояние')}${th('plan', 'По графику')}${th('forecast', 'Прогноз')}${th('delay', 'Опоздание')}<th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
-          <tbody>
-            ${rows.map(t => html`<tr key=${t.number} class=${app.ui.selectedTrain === t.number ? 'sel' : ''}>
-              <td data-label="№"><strong>${t.number}</strong></td>
-              <td data-label="Тип"><${Badge} tone=${PRIORITY[t.priority].tone}>${t.label}</${Badge}></td>
-              <td data-label="Маршрут">${stationName(data, t.route[0][1])} <${Icon} name="arrow-right" size=${13} class="inline" /> ${stationName(data, t.route.at(-1)[1])}</td>
-              <td data-label="Локомотив"><div class="two"><span>${t.loco.series}</span><small>${t.loco.type} · ${t.grossT} т</small></div></td>
-              <td data-label="Загрузка" class="num"><div class="two"><span>${t.loadPct}%</span><small>${t.wagons} ваг.${t.cargo ? ` · ${data.cargoNames[t.cargo].toLowerCase()}` : ''}</small></div></td>
-              <td data-label="ТО / состояние"><div class="two"><span class=${['скоро ТО'].includes(t.techState.status) ? 'bad' : ''}>${t.techState.status}</span><small>${t.techState.conditionPct}% · с ТО ${t.techState.hoursSince} ч</small></div></td>
-              <td data-label="По графику" class="num">${clockAt(data, t.route.at(-1)[0])}</td>
-              <td data-label="Прогноз" class="num">${t.disabled ? '—' : clockAt(data, t.forecast.at(-1)[0])}</td>
-              <td data-label="Опоздание" class=${`num ${t.delay > 0 || t.disabled ? 'bad' : ''}`}>${t.disabled ? 'снят с рейса' : delayText(t.delay)}</td>
-              <td class="actions-cell"><${Button} size="sm" variant="ghost" icon="chart-gantt" onClick=${() => show(t)}>На схеме</${Button}></td>
-            </tr>`)}
-            ${!rows.length && html`<tr><td colspan="10"><${Empty} icon="search" title="Ничего не найдено">Измените поиск, категорию или состояние.</${Empty}></td></tr>`}
-          </tbody>
-        </table>
-      </div>
-      <div class="table-foot"><span>Показано ${rows.length} из ${data.trains.length}</span></div>
-    </section>`;
+export function Trains() {
+  return html`<${PageHeader} title="Поезда" subtitle="Все поезда КТЖ на линии прямо сейчас: поиск по городу, станции и участку, фильтры по типу, состоянию и тяге" />
+    <${NetworkTrains} />`;
 }
 
-function CorridorStations({ data, scopeTabs }) {
-  const now = useLiveNow(4);
-  return html`<${PageHeader} title="Станции" subtitle="Грузовая работа, подъездные пути и подход вагонов по каждой станции" />
-    ${scopeTabs}
-    <p class="note station-explainer">Занятость — вагоны на подъездных путях. Проходящие поезда и группы, ожидающие команды «Принять», в неё не входят. После обработки вагоны занимают путь до уборки.</p>
-    <div class="station-grid">
-      ${data.stations.map(s => {
-        const load = Math.round(s.occupied / s.capacity * 100);
-        const traffic = stationTraffic(data, s.id, now);
-        return html`<a key=${s.id} class="panel station-card" data-station=${s.id} href=${href(`/station/${s.id}`)}>
-          <div class="sc-head"><span class="code lg">${s.id}</span><div><h2>${s.name}</h2><small>${s.type} · ${s.km} км</small></div></div>
-          <div class="sc-occupancy"><strong>${s.occupied} / ${s.capacity} ваг.</strong><span>${load}% занято</span></div>
-          <div class="occ-bar" role="img" aria-label=${`На подъездных путях ${s.occupied} из ${s.capacity} вагонов, резерв ${s.reserved}`}>
-            ${['processing', 'done', 'waiting', 'reserved'].map(key => html`<i key=${key} class=${`seg ${key}`} style=${`width:${s[key] / s.capacity * 100}%`}></i>`)}
-          </div>
-          <div class="sc-cargo"><span>В работе ${s.processing}</span><span>Обработано ${s.done}</span><span>Ждут фронта ${s.waiting}</span></div>
-          <dl class="sc-stats">
-            <div><dt>Доступно, ваг.</dt><dd>${s.available}</dd></div>
-            <div><dt>Резерв, ваг.</dt><dd>${s.reserved}</dd></div>
-            <div><dt>Ждут приёма</dt><dd>${traffic.waiting} гр.</dd><small>${traffic.waitingWagons} ваг.</small></div>
-            <div><dt>В пути</dt><dd>${traffic.enRoute} гр.</dd><small>${traffic.enRouteWagons} ваг.</small></div>
-          </dl></a>`;
-      })}
-    </div>`;
-}
-
-function scopeTabs(scope, setScope, networkCount, corridorCount) {
-  return html`<${Tabs} label="Охват" value=${scope} idPrefix="scope" onChange=${setScope}
-    tabs=${[{ value: 'network', label: 'Вся сеть КТЖ', count: networkCount }, { value: 'corridor', label: 'Участок Караганда — Мойынты', count: corridorCount }]} />`;
-}
-
-export function Trains({ data }) {
-  const [scope, setScope] = useState('network');
-  const tabs = html`<div id="scope-panel">${scopeTabs(scope, setScope, null, data.trains.length)}</div>`;
-  return scope === 'network'
-    ? html`<${PageHeader} title="Поезда сети" subtitle="Все поезда КТЖ на линии прямо сейчас: поиск по городу, станции и участку, фильтры по типу, состоянию и тяге" />
-        <${NetworkTrains} scopeTabs=${tabs} />`
-    : html`<${CorridorTrains} data=${data} scopeTabs=${tabs} />`;
-}
-
-export function Stations({ data }) {
-  const [scope, setScope] = useState('network');
-  const tabs = html`<div id="scope-panel">${scopeTabs(scope, setScope, null, data.stations.length)}</div>`;
-  return scope === 'network'
-    ? html`<${PageHeader} title="Станции сети" subtitle="Все станции и остановочные пункты Казахстана с привязкой к участкам и ближайшими поездами" />
-        <${NetworkStations} scopeTabs=${tabs} />`
-    : html`<${CorridorStations} data=${data} scopeTabs=${tabs} />`;
+export function Stations() {
+  return html`<${PageHeader} title="Станции" subtitle="Все станции и остановочные пункты Казахстана с привязкой к участкам и ближайшими поездами" />
+    <${NetworkStations} />`;
 }

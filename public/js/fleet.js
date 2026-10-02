@@ -3,42 +3,37 @@ import { html, Icon, count } from './lib.js';
 import { app, go, updateUi } from './store.js';
 import { Badge, Button, Kpi, PageHeader, Empty } from './ui.js';
 import { useNetwork, KIND_NAMES } from './geo-network.js';
+import { useNetworkTrains } from './network-data.js';
 
 const KIND_ICON = { electric: 'zap', mainDiesel: 'fuel', shunting: 'cog' };
 const fmt = n => n.toLocaleString('ru-RU');
 
-/** Локомотивы, задействованные в моделируемом участке сейчас. */
-export function corridorFleet(data) {
-  const nm = (data.now - data.baseTime) / 60000;
-  const onLine = data.trains.filter(t => t.forecast[0][0] <= nm && t.forecast.at(-1)[0] >= nm && !t.service);
+/** Локомотивы в пути по всей сети сейчас. */
+export function networkFleet(trains) {
   const by = new Map();
-  for (const t of data.trains) {
-    const key = t.loco.series;
-    const e = by.get(key) || { series: key, type: t.loco.type, powerKw: t.loco.powerKw, total: 0, running: 0 };
-    e.total += 1;
-    if (onLine.includes(t)) e.running += 1;
-    by.set(key, e);
+  for (const t of trains) {
+    const e = by.get(t.loco.series) || { series: t.loco.series, type: t.loco.type, powerKw: t.loco.kw, running: 0 };
+    e.running += 1; by.set(t.loco.series, e);
   }
-  const series = [...by.values()].sort((a, b) => b.total - a.total);
-  const sum = type => ({ total: data.trains.filter(t => t.loco.type === type).length, running: onLine.filter(t => t.loco.type === type).length });
-  return { series, electric: sum('электровоз'), diesel: sum('тепловоз'), onLine: onLine.length };
+  const sum = type => trains.filter(t => t.loco.type === type).length;
+  return { series: [...by.values()].sort((a, b) => b.running - a.running), electric: sum('электровоз'), diesel: sum('тепловоз'), onLine: trains.length };
 }
 
 /** Примерный парк КТЖ по типам тяги и «на участке сейчас». */
 export function FleetSummary({ data, compact = false }) {
   const network = useNetwork();
+  const { trains } = useNetworkTrains(10);
   if (!network) return html`<section class="fleet-summary"><p class="muted">Загружаем данные о парке…</p></section>`;
   if (network.error) return null;
   const { fleet } = network;
-  const cf = corridorFleet(data);
+  const cf = networkFleet(trains);
   const max = Math.max(...fleet.types.map(t => t.approx));
   return html`<section class=${`fleet-summary ${compact ? 'compact' : ''}`} aria-labelledby=${compact ? 'fleet-sum-title' : undefined}>
     <h3 id="fleet-sum-title">Локомотивы КТЖ <${Badge} tone="muted" title=${fleet.disclaimer}>оценка</${Badge}></h3>
     <p class="fleet-total"><strong>≈ ${fmt(fleet.total)}</strong> локомотивов в парке</p>
     <ul class="fleet-bars">${fleet.types.map(t => html`<li key=${t.id}><span class="fb-name"><${Icon} name=${KIND_ICON[t.id]} size=${15} />${t.name}</span>
       <span class="fb-bar" role="img" aria-label=${`${t.name}: около ${t.approx}`}><i style=${`width:${t.approx / max * 100}%`}></i></span><strong class="num">≈ ${fmt(t.approx)}</strong></li>`)}</ul>
-    <p class="fleet-corridor"><${Icon} name="train-front" size=${15} />На участке сейчас: <strong>${cf.electric.running + cf.diesel.running}</strong> локомотивов в пути
-      (электровозов ${cf.electric.running}, тепловозов ${cf.diesel.running}); в расписании на 2,5 часа — ${cf.electric.total} и ${cf.diesel.total}.</p>
+    <p class="fleet-corridor"><${Icon} name="train-front" size=${15} />В пути сейчас: <strong>${cf.onLine}</strong> локомотивов (электровозов ${cf.electric}, тепловозов ${cf.diesel}).</p>
     ${!compact && html`<a class="link" href="#/fleet">Подробнее о парке и сети →</a>`}
     ${compact && html`<a class="link" href="#/fleet">Парк, серии и депо →</a>`}
   </section>`;
@@ -46,6 +41,7 @@ export function FleetSummary({ data, compact = false }) {
 
 export function FleetPage({ data }) {
   const network = useNetwork();
+  const { trains } = useNetworkTrains(10);
   const [query, setQuery] = useState('');
   const results = useMemo(() => {
     if (!network || network.error) return [];
@@ -58,11 +54,11 @@ export function FleetPage({ data }) {
   if (!network) return html`<${PageHeader} title="Парк и сеть" subtitle="Загружаем данные…" />`;
   if (network.error) return html`<${PageHeader} title="Парк и сеть" /><${Empty} icon="circle-alert" title="Данные не загрузились">Обновите страницу.</${Empty}>`;
   const { fleet, net } = network;
-  const cf = corridorFleet(data);
-  const showOnMap = (rec, kind) => { updateUi({ mapFocus: { kind, rec } }); go('/map'); };
-  const showDepot = d => { updateUi({ mapFocus: { kind: 'depot', lat: d.lat, lon: d.lon } }); go('/map'); };
-  return html`<${PageHeader} title="Парк и сеть" subtitle="Локомотивы КТЖ (оценка), станции Казахстана и депо. Модель участка использует те же серии."
-      actions=${html`<${Button} variant="primary" icon="map-pin" onClick=${() => go('/map')}>Открыть карту</${Button}>`} />
+  const cf = networkFleet(trains);
+  const showOnMap = (rec, kind) => { updateUi({ mapFocus: { kind, rec } }); go('/'); };
+  const showDepot = d => { updateUi({ mapFocus: { kind: 'depot', lat: d.lat, lon: d.lon } }); go('/'); };
+  return html`<${PageHeader} title="Парк и сеть" subtitle="Локомотивы КТЖ (оценка), станции Казахстана и депо. Модель движения использует те же серии."
+      actions=${html`<${Button} variant="primary" icon="map-pin" onClick=${() => go('/')}>Открыть карту</${Button}>`} />
     <section class="kpis" aria-label="Парк и сеть в цифрах">
       <${Kpi} label="Парк локомотивов" icon="truck" value=${`≈ ${fmt(fleet.total)}`} note="оценка на 2026 год" />
       ${fleet.types.map(t => html`<${Kpi} key=${t.id} label=${t.name} icon=${KIND_ICON[t.id]} value=${`≈ ${fmt(t.approx)}`} note=${t.note} />`)}
@@ -84,9 +80,9 @@ export function FleetPage({ data }) {
           <small class="muted">По состоянию на ${fleet.deliveries2026.asOf}.</small>
         </section>
         <section class="panel" aria-labelledby="mod-title">
-          <div class="panel-head"><h2 id="mod-title">Модель участка</h2></div>
-          <p class="muted">Сейчас в расписании ${count(data.trains.length, ['поезд', 'поезда', 'поездов'])}, в пути ${cf.onLine}.</p>
-          <ul class="series-now">${cf.series.map(s => html`<li key=${s.series}><span><strong>${s.series}</strong> <small>${s.type}, ${fmt(s.powerKw)} кВт</small></span><span class="num">${s.running} в пути / ${s.total}</span></li>`)}</ul>
+          <div class="panel-head"><h2 id="mod-title">Парк в работе сейчас</h2></div>
+          <p class="muted">Сейчас на линии ${count(cf.onLine, ['поезд', 'поезда', 'поездов'])}.</p>
+          <ul class="series-now">${cf.series.map(s => html`<li key=${s.series}><span><strong>${s.series}</strong> <small>${s.type}, ${fmt(s.powerKw)} кВт</small></span><span class="num">${s.running} в пути</span></li>`)}</ul>
         </section>
       </aside>
     </div>

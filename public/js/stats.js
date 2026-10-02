@@ -43,7 +43,7 @@ function HourChart({ buckets }) {
   </svg>`;
 }
 
-export function StatsPage({ data }) {
+export function StatsPage() {
   const [windowMin, setWindowMin] = useState(1440);
   const [sortKey, setSortKey] = useState('decisions');
   const { sim, trains, now, loading } = useNetworkTrains(10);
@@ -100,8 +100,6 @@ export function StatsPage({ data }) {
   }, [trains]);
 
   const routes = useMemo(() => (m ? [...m.routes].sort((a, b) => (sortKey === 'route' ? a.route.localeCompare(b.route, 'ru') : b[sortKey] - a[sortKey])) : []), [m, sortKey]);
-  const { dispatch } = data;
-  const best = dispatch.variants.find(v => v.recommended), worst = [...dispatch.variants].sort((a, b) => b.metrics.weighted - a.metrics.weighted)[0];
   const exportCsv = () => downloadCsv('model-statistics.csv', [['Участок', 'Поездов сейчас', 'Ср. скорость, км/ч', 'Стоят вынужденно', 'Решений', 'Задержек и неисправностей', 'Смен бригад', 'Сэкономлено, мин', 'Сэкономлено, взвеш. мин', 'Ср. простой, мин'],
     ...routes.map(r => [r.route, r.trains, r.avgSpeed, r.forced, r.decisions, r.problems, r.crew, r.savedMin, r.savedW, r.avgDwell])]);
   const avgHold = m?.hold.length ? m.hold.reduce((a, b) => a + b, 0) / m.hold.length : 0;
@@ -148,13 +146,6 @@ export function StatsPage({ data }) {
         <${Histogram} title="Время до смены бригады" rows=${fleet.left} note="красным — смена в ближайший час" />
         <${Histogram} title="Время до ТО локомотива" rows=${fleet.to} note="красным — ТО менее чем через 8 часов" />
         <${Histogram} title="Длительность простоев (решённые)" rows=${[['до 15 мин', 0, 15], ['15–30', 15, 30], ['30–60', 30, 60], ['более часа', 60, 1e9]].map(([label, a, b]) => ({ label, value: m.hold.filter(x => x >= a && x < b).length }))} note="за выбранный период" /></div></section>
-    <section class="panel"><div class="panel-head"><div><h2>Участок Караганда — Мойынты (детальная модель)</h2><small>Здесь модель сравнивает варианты пропуска и пересчитывает прогноз.</small></div><${Badge} tone=${data.blocked ? 'danger' : 'neutral'}>${data.blocked ? 'Есть закрытие' : 'Без закрытий'}</${Badge}></div>
-      <div class="kpis kpis-tight"><${Kpi} label="Поездов в расписании" icon="train-front" value=${data.trains.length} note=${`${data.trains.filter(t => t.delay > 0).length} с опозданием`} />
-        <${Kpi} label="Суммарное опоздание" icon="hourglass" value=${data.trains.reduce((n, t) => n + Math.max(0, t.delay || 0), 0)} unit=" мин" note=${`пассажирские: ${data.trains.filter(t => t.category === 'passenger').reduce((n, t) => n + Math.max(0, t.delay || 0), 0)} мин`} />
-        <${Kpi} label="Конфликтов на пути" icon="triangle-alert" value=${dispatch.conflicts.length} note=${`закрытий: ${dispatch.closures.length}, ограничений: ${data.restrictions.length}`} />
-        <${Kpi} label="Уведомлений пассажирам" icon="bell-ring" value=${data.notifications.length} note="отправлено при изменении прогноза" />
-        <${Kpi} label="Экономия выбранного варианта" icon="timer-reset" tone="accent" value=${best && worst ? worst.metrics.total - best.metrics.total : 0} unit=" мин" note=${best && worst ? `против худшего варианта; пассажирские −${worst.metrics.passenger - best.metrics.passenger} мин` : 'при закрытии пути модель сравнит варианты'} /></div>
-      ${best ? html`<p class="model-why"><${Icon} name="lightbulb" size=${16} /><span>${dispatch.why}</span></p>` : html`<p class="muted">Сейчас на участке нет закрытий путей, поэтому выбирать между вариантами не нужно.</p>`}</section>
     <section class="panel"><div class="panel-head"><div><h2>Как работала модель</h2></div></div>
       <ul class="plain-list">
         <li>Модель обработала <strong>${fmt(trains.length)}</strong> поездов сети и сформировала <strong>${fmt(m.total)}</strong> записей за ${windowMin / 60} ч; расчёт ленты занял ${calc.ms} мс.</li>

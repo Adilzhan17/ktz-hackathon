@@ -7,14 +7,10 @@ import { attachNetwork, NetworkBar, useNetwork, KZ_BOUNDS } from './geo-network.
 import { FleetSummary } from './fleet.js';
 import { TrainSpecs } from './train-specs.js';
 import { networkTrains, networkStats } from './network-sim.js';
-import { useSim, inCorridor } from './network-data.js';
-import { placeTrains } from './trackmap.js';
-import { coordinateAt, indexOfLocation, prepareGeometry } from './geo-position.js';
-import { CORRIDOR } from '/engine/rail-corridor.js';
+import { useSim } from './network-data.js';
 
 const COLORS = { passenger: '#007aa5', container: '#2c5770', freight: '#7a8c98' };
 const FILTERS = [{ value: 'all', label: 'Все' }, { value: 'passenger', label: 'Пассажирские' }, { value: 'container', label: 'Контейнерные' }, { value: 'freight', label: 'Грузовые' }, { value: 'stopped', label: 'Стоят' }];
-const GEOMETRY = prepareGeometry(CORRIDOR.segments);
 const SPEEDS = [{ value: 1, label: 'Реальное' }, { value: 60, label: '×60' }, { value: 180, label: '×180' }, { value: 600, label: '×600' }];
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => n.toLocaleString('ru-RU');
@@ -122,15 +118,12 @@ export function NetworkPage({ data }) {
   const simRef = useRef(sim); simRef.current = sim;
   const stateRef = useRef({ trains: [], filter, selected, hover, labels });
   stateRef.current.filter = filter; stateRef.current.selected = selected; stateRef.current.hover = hover; stateRef.current.labels = labels;
-  const dataRef = useRef(data); dataRef.current = data;
-  if (sim && !sim.error && !stateRef.current.trains.length) stateRef.current.trains = networkTrains(sim, netNow(), { exclude: inCorridor });
+  if (sim && !sim.error && !stateRef.current.trains.length) stateRef.current.trains = networkTrains(sim, netNow());
   const trains = stateRef.current.trains;
   const stats = networkStats(trains);
   const shown = trains.filter(t => matches(t, filter));
   const picked = selected && trains.find(t => t.uid === selected);
   const hovered = hover && trains.find(t => t.uid === hover);
-  const nm = (liveNow() - data.baseTime) / 60000;
-  const detailed = placeTrains(data, nm);
   const forced = trains.filter(t => t.stopped && !t.planned).sort((a, b) => b.delayMin - a.delayMin).slice(0, 7);
   const [tip, setTip] = useState(null);
 
@@ -148,15 +141,11 @@ export function NetworkPage({ data }) {
     base.addTo(map);
     L.tileLayer('https://tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', { maxZoom: 19, opacity: 0.4,
       attribution: 'Railway style: <a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (CC-BY-SA 2.0)' }).addTo(map);
-    const network = attachNetwork(L, map);
+    const network = attachNetwork(L, map, { all: true });
     network.set('stations', true);
     network.set('halts', true);
-    const renderer = L.canvas({ padding: 0.3 });
     const selectedRoute = L.polyline([], { color: '#bf2520', weight: 4, opacity: 0.8, interactive: false }).addTo(map);
-    CORRIDOR.segments.forEach(points => L.polyline(points, { color: '#fff', weight: 7, opacity: 0.95, interactive: false }).addTo(map));
-    CORRIDOR.segments.forEach(points => L.polyline(points, { color: '#00a9d8', weight: 4, opacity: 0.95, interactive: false }).addTo(map).bindTooltip('Участок диспетчерской модели: Караганда — Мойынты'));
     const canvas = createTrainCanvas(map, () => stateRef.current);
-    const detailedMarkers = new Map();
     scene.current = { map, network, flyTo: (lat, lon, z = 9) => map.flyTo([lat, lon], z, { duration: 0.8 }) };
     // подвижные объекты: пересчёт и рисование ~12 раз в секунду
     let raf = 0, last = 0;
@@ -165,26 +154,13 @@ export function NetworkPage({ data }) {
       if (ts - last >= 80) {
         last = ts;
         const sm = simRef.current;
-        if (sm && !sm.error) stateRef.current.trains = networkTrains(sm, netNow(), { exclude: inCorridor });
+        if (sm && !sm.error) stateRef.current.trains = networkTrains(sm, netNow());
         canvas.draw();
         const sel = stateRef.current.trains.find(t => t.uid === stateRef.current.selected);
         const route = sel && sm?.byId?.get(sel.routeId);
         if (!route && selectedRoute.getLatLngs().length) selectedRoute.setLatLngs([]);
         else if (route && selectedRoute._routeId !== route.id) { selectedRoute.setLatLngs(route.points.map(p => [p[0], p[1]])); selectedRoute._routeId = route.id; }
         if (!route) selectedRoute._routeId = null;
-        const seen = new Set();
-        for (const r of placeTrains(dataRef.current, (liveNow() - dataRef.current.baseTime) / 60000)) {
-          const key = r.t.number; seen.add(key);
-          const point = coordinateAt(GEOMETRY, indexOfLocation(r.loc));
-          let m = detailedMarkers.get(key);
-          if (!m) {
-            m = L.circleMarker(point, { renderer, radius: 7, color: '#fff', weight: 2, fillColor: '#00a9d8', fillOpacity: 1 }).addTo(map);
-            m.bindTooltip(`№${esc(r.t.number)} · ${esc(r.t.label)} · диспетчерская модель`, { direction: 'top' });
-            m.on('click', () => { updateUi({ selectedTrain: r.t.number }); go('/overview'); });
-            detailedMarkers.set(key, m);
-          } else m.setLatLng(point);
-        }
-        for (const [k, m] of detailedMarkers) if (!seen.has(k)) { map.removeLayer(m); detailedMarkers.delete(k); }
       }
       raf = requestAnimationFrame(frame);
     };
@@ -210,10 +186,10 @@ export function NetworkPage({ data }) {
   const flyToTrain = t => { setSelected(t.uid); updateUi({ selectedNetTrain: t.uid }); scene.current?.flyTo(t.lat, t.lon, 8); };
   const netTime = netNow();
   return html`<${PageHeader} title="Сеть КТЖ в реальном времени"
-      subtitle=${`${fmt(stats.total + detailed.length)} поездов на сети · ${net && !net.error ? fmt(net.net.stations.length) : '…'} станций · ${sim?.routes ? sim.routes.length : '…'} магистральных маршрутов`}
-      actions=${html`<${Button} icon="chart-gantt" onClick=${() => go('/overview')}>Диспетчерский участок</${Button}>`} />
+      subtitle=${`${fmt(stats.total)} поездов на сети · ${net && !net.error ? fmt(net.net.stations.length) : '…'} станций · ${sim?.routes ? sim.routes.length : '…'} магистральных маршрутов`}
+      />
     <section class="kpis net-kpis" aria-label="Сеть в цифрах">
-      <${Kpi} label="Поездов на сети" icon="train-front" value=${fmt(stats.total + detailed.length)} note=${`${detailed.length} в детальной модели участка`} />
+      <${Kpi} label="Поездов на сети" icon="train-front" value=${fmt(stats.total)} note="на магистральных маршрутах Казахстана" />
       <${Kpi} label="Пассажирских" icon="users" value=${stats.passenger} note=${`≈ ${fmt(Math.round(stats.passengers / 100) * 100)} пассажиров в пути`} />
       <${Kpi} label="Грузовых и контейнерных" icon="package" value=${fmt(stats.freight + stats.container)} note=${`${fmt(stats.wagons)} вагонов в пути`} />
       <${Kpi} label="Локомотивы в пути" icon="zap" value=${fmt(stats.electric + stats.diesel)} note=${`электровозов ${stats.electric}, тепловозов ${stats.diesel}`} />
@@ -257,9 +233,5 @@ export function NetworkPage({ data }) {
         </aside>
       </div>
     </section>
-    <section class="panel net-corridor" aria-labelledby="corr-title">
-      <div class="panel-head"><div><h2 id="corr-title">Диспетчерский участок Караганда — Мойынты</h2><small>336 км, 10 станций: здесь работает полная модель — конфликты, варианты пропуска, ТО, поломки. Время на участке идёт в реальном ходе.</small></div>
-        <${Badge} tone=${data.blocked ? 'danger' : 'neutral'} icon=${data.blocked ? 'siren' : 'circle-check'}>${data.blocked ? 'Есть закрытие пути' : 'Движение по графику'}</${Badge}></div>
-      <div class="btn-row"><${Button} variant="primary" icon="chart-gantt" onClick=${() => go('/overview')}>Открыть обстановку</${Button}><${Button} icon="scale" onClick=${() => go('/decisions')}>Решения диспетчера</${Button}><${Button} icon="map-pin" onClick=${() => go('/map')}>Карта участка</${Button}><${Button} icon="truck" onClick=${() => go('/fleet')}>Парк и сеть</${Button}></div>
-    </section>`;
+`;
 }
