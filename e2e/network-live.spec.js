@@ -1,5 +1,23 @@
 import { test, expect } from '@playwright/test';
 
+test('automatic schedule exists before manual calculation and service pushes a local revision', async ({ page, request }) => {
+  await page.goto('/#/schedules');
+  await expect(page.getByRole('heading', { name: 'График рейсов' })).toBeVisible();
+  const before = await (await request.get('/api/schedule')).json();
+  expect(before.plan.optimized.rows.length).toBeGreaterThan(100);
+  const row = before.plan.optimized.rows.find(r => r.locoId?.startsWith('reserve:'));
+  await page.getByLabel('Локомотив для обслуживания').selectOption(row.locoId);
+  await page.getByLabel('Вид обслуживания').selectOption('daily');
+  await page.getByRole('button', { name: 'Назначить работы и пересчитать' }).click();
+  await expect(page.getByText(/Пересчёт завершён:/)).toBeVisible();
+  const after = await (await request.get('/api/schedule')).json();
+  expect(after.plan.revision).toBe((before.plan.revision || 0) + 1);
+  expect(after.plan.constraints.at(-1).until - after.plan.constraints.at(-1).from).toBe(86400000);
+  await page.goto('/#/model');
+  await page.getByRole('tab', { name: 'Изменения расписания' }).click();
+  await expect(page.getByText(/Суточное обслуживание · изменено/)).toBeVisible();
+});
+
 test('schedules assign locomotives, show cost inputs, persist and export the plan', async ({ page, request }) => {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/#/schedules');

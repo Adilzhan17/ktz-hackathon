@@ -8,6 +8,9 @@ import { networkDecisions } from './network-sim.js';
 import { RouteSelect } from './network-lists.js';
 import { EventFeed } from './log.js';
 import { ExportButton } from './network-export.js';
+import { useNetworkArchive } from './network-archive.js';
+import { useLiveSchedule } from './schedule-live.js';
+import { ScheduleChanges } from './schedule-visual.js';
 
 const VERDICT = {
   justified: { label: 'Задержка оправдана', tone: 'accent', icon: 'circle-check' },
@@ -73,12 +76,15 @@ function NetworkDecisions() {
 
 export function ModelPage() {
   const [scope, setScope] = useState('network');
+  const archive = useNetworkArchive();
+  const schedule = useLiveSchedule();
   return html`<${PageHeader} title="Решения модели" subtitle="Что модель выбирает, по каким правилам и почему это выгоднее: по всей сети КТЖ"
       actions=${html`<${ExportButton} section="decisions" /><${ExportButton} section="model" /><${Button} icon="book-open" onClick=${() => go('/how')}>Как это работает</${Button}>`} />
+    <section class="panel"><div class="tab-panel"><h2>Что означают счётчики</h2><p>10–15 технических причин — это число текущих вынужденных стоянок, а не история работы системы. Плановые стоянки, все отправления и приёмы доступны в журнале.</p><p>В архиве: ${archive.events.length.toLocaleString('ru-RU')} операций. Пересчётов расписания: ${schedule.plan?.changes?.length || 0}. Каждое изменение можно раскрыть до поезда, времени и замены тяги.</p></div></section>
     <${Tabs} label="Охват решений" value=${scope} idPrefix="md" onChange=${setScope}
-      tabs=${[{ value: 'network', label: 'Вся сеть' }, { value: 'journal', label: 'Журнал решений' }]} />
+      tabs=${[{ value: 'network', label: 'Сейчас · вся сеть' }, { value: 'schedule', label: 'Изменения расписания' }, { value: 'journal', label: 'Журнал решений' }]} />
     <div id="md-panel" role="tabpanel" aria-labelledby=${`md-${scope}`} class="tab-panel">
-      ${scope === 'network' ? html`<${NetworkDecisions} />`
+      ${scope === 'network' ? html`<${NetworkDecisions} />` : scope === 'schedule' ? html`<${ScheduleChanges} plan=${schedule.plan} />`
         : html`<section class="panel"><div class="panel-head"><div><h2>Журнал принятых решений</h2><small>Что модель решила прямо сейчас и недавно: принять, отправить, пропустить приоритетный поезд, сменить бригаду, задержать, устранить неисправность. Лента идёт в реальном времени.</small></div></div><${EventFeed} /></section>`}
       <p class="note"><${Icon} name="info" size=${15} /> Приоритеты: пассажирский ×10, контейнерный ×2, грузовой ×1. История операций и расчёт эффекта доступны во вкладке «Журнал решений» и в полном экспорте. </p>
     </div>`;

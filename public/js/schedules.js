@@ -4,6 +4,9 @@ import { PageHeader, Button, Badge, Kpi, Segmented } from './ui.js';
 import { useNetworkTrains } from './network-data.js';
 import { RouteSelect } from './network-lists.js';
 import { SCHEDULE_DEFAULTS, ENERGY_DEFAULTS, buildSchedule, scheduleEconomics } from './schedule-engine.js';
+import { useLiveSchedule } from './schedule-live.js';
+import { ScheduleChanges, ScheduleVisual, MaintenanceControls } from './schedule-visual.js';
+import { ECONOMIC_REFERENCE, ECONOMIC_SOURCES } from './economic-reference.js';
 
 const fmt = n => Math.round(n).toLocaleString('ru-RU');
 const stamp = n => `${dateShort(n)} ${time(n)}`;
@@ -20,17 +23,19 @@ const rateFields = [
 
 export function SchedulesPage() {
   const { sim, now, failed } = useNetworkTrains(1);
+  const live = useLiveSchedule();
   const [config, setConfig] = useState({ ...SCHEDULE_DEFAULTS });
-  const [rates, setRates] = useState({ ...ENERGY_DEFAULTS });
+  const [rates, setRates] = useState({ ...ECONOMIC_REFERENCE });
   const [route, setRoute] = useState('all'), [plan, setPlan] = useState(null);
   const [query, setQuery] = useState(''), [view, setView] = useState('optimized'), [limit, setLimit] = useState(60);
   const [message, setMessage] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  useEffect(() => { if (live.plan) { setPlan(live.plan); setMessage(`Автоматический план · ревизия ${live.plan.revision || 0}`); } }, [live.plan]);
   useEffect(() => {
     if (!sim || sim.error) return;
     let active = true;
     fetch('/api/schedule').then(r => { if (!r.ok) throw new Error('Не удалось получить сохранённый план'); return r.json(); }).then(saved => {
       if (!active) return;
-      if (saved.plan) { setPlan(saved.plan); setConfig(saved.plan.config); setRoute(saved.plan.routeId); setRates(saved.rates || ENERGY_DEFAULTS); setMessage(`Общий план от ${stamp(saved.plan.createdAt)}`); }
+      if (saved.plan) { setPlan(saved.plan); setConfig(saved.plan.config); setRoute(saved.plan.routeId); setRates(saved.rates?.dieselPrice ? saved.rates : ECONOMIC_REFERENCE); setMessage(`Общий план от ${stamp(saved.plan.createdAt)}`); }
       else setPlan(buildSchedule(sim, now));
     }).catch(e => { if (active) { setPlan(buildSchedule(sim, now)); setError(e.message); } });
     return () => { active = false; };
@@ -55,6 +60,8 @@ export function SchedulesPage() {
     ...(plan?.[view]?.rows || []).map(r => [r.uid, r.number, r.route, r.from, r.to, r.wagons, r.consist.grossT, new Date(r.departedMs).toISOString(), r.departure ? new Date(r.departure).toISOString() : '', r.arrival ? new Date(r.arrival).toISOString() : '', r.locoId, r.assignedSeries, r.waitMin, r.reason])]);
   return html`<${PageHeader} title="Расписания" subtitle="Автосоставление плана рейсов, назначение тяги составам и расчёт оборота локомотивов"
     actions=${html`<${Button} icon="download" disabled=${!plan} onClick=${csv}>Расписание · CSV</${Button}><a class="btn btn-secondary" href="/api/schedule?download=1" download="ktz-schedule.json">Сохранённый план · JSON</a>`} />
+    <p class="feed-status"><span class="feed-dot live"></span>План создаётся сервером автоматически. Неисправности и назначенные работы запускают локальный пересчёт связанных оборотов.${live.failed ? ' Связь с планировщиком восстанавливается…' : ''}</p>
+    ${plan && html`<${ScheduleVisual} plan=${plan} now=${now} /><${ScheduleChanges} plan=${plan} /><${MaintenanceControls} plan=${plan} />`}
     <section class="panel"><div class="panel-head"><div><h2>Параметры планирования</h2><small>Составы берутся из расписания сети. Локомотив появляется в следующем пункте только после прибытия и оборота.</small></div></div>
       <div class="tab-panel"><div class="filter-row"><${RouteSelect} sim=${sim} value=${route} onChange=${setRoute} /><${Segmented} label="Горизонт расписания" value=${config.horizonH} onChange=${horizonH => setConfig({ ...config, horizonH })} options=${[6, 12, 24].map(value => ({ value, label: `${value} часов` }))} /></div>
       <div class="detail-grid">${numberFields.map(([key, label, min, max]) => html`<label class="schedule-field" key=${key}><span>${label}</span><input type="number" min=${min} max=${max} value=${config[key]} onInput=${e => setConfig({ ...config, [key]: e.target.value === '' ? NaN : Number(e.target.value) })} /></label>`)}</div>
@@ -70,7 +77,8 @@ export function SchedulesPage() {
       <section class="panel"><div class="panel-head"><div><h2>Экономика плана</h2><small>Сравнение одного набора рейсов и одного парка. Это прогноз эффекта плана, не накопленная экономия исполненных операций.</small></div></div>
         <div class="tab-panel"><label class="schedule-field"><span>Вид дизельного топлива</span><select value=${rates.dieselGrade} onChange=${e => setRates({ ...rates, dieselGrade: e.target.value })}><option value="summer">Летнее</option><option value="winter">Зимнее</option><option value="arctic">Арктическое</option></select></label>
         <div class="detail-grid">${rateFields.map(([key, label]) => html`<label class="schedule-field" key=${key}><span>${label}</span><input type="number" min="0" max="10000000" step="any" value=${rates[key]} onInput=${e => setRates({ ...rates, [key]: e.target.value === '' ? NaN : Number(e.target.value) })} /></label>`)}</div>
-        <p class="muted">Укажите нормы и цены для выбранного вида топлива. Нулевые поля означают, что статья не оценена. Электроэнергия считается отдельно. Стоимость часа должна исключать энергию и другие уже учтённые статьи.</p>
+        <p class="muted">Начальный расчёт заполнен по открытым ориентирам и явно указанным допущениям. Это сценарная оценка, не закупочные тарифы КТЖ. Для зимнего и арктического дизеля нужна цена соответствующей поставки. Нулевые статьи не оценены.</p>
+        <details><summary>Источники цен и норм · проверено 03.10.2026</summary>${ECONOMIC_SOURCES.map(s => html`<p><strong>${s.label}.</strong> ${s.note} ${s.url && html`<a href=${s.url} target="_blank" rel="noopener">Источник</a>`}</p>`)}</details>
         ${economics ? html`<div class="kpis kpis-tight"><${Kpi} label="Денежный эффект" value=${economics.ready ? fmt(economics.totalKzt) : 'Нужны нормы'} unit=${economics.ready ? ' ₸' : ''} note=${`По заполненным статьям: ${fmt(economics.totalKzt)} ₸`} />
           <${Kpi} label="Дизтопливо на стоянках" value=${rates.dieselLitresH ? fmt(economics.dieselLitres) : 'Нужна норма'} unit=${rates.dieselLitresH ? ' л' : ''} note=${`Изменение стоянки тяги ${fmt(economics.dieselHours)} ч`} />
           <${Kpi} label="Электроэнергия на стоянках" value=${rates.electricKwhH ? fmt(economics.electricKwh) : 'Нужна норма'} unit=${rates.electricKwhH ? ' кВт·ч' : ''} note=${`Изменение стоянки тяги ${fmt(economics.electricHours)} ч`} />

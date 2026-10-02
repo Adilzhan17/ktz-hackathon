@@ -27,14 +27,29 @@ export function planningFleet(trips, active, now, config) {
   return locos;
 }
 
-export function allocateTrips(trips, fleet, config, optimized = true) {
+export function allocateTrips(trips, fleet, config, optimized = true, constraints = [], committed = []) {
   const locos = fleet.map(l => ({ ...l })), rows = [], slots = new Map();
   // Сначала более ранние заявки; при одинаковом времени — пассажирские, затем контейнерные.
   const ordered = [...trips].sort((a, b) => a.departedMs - b.departedMs || WEIGHT[b.category] - WEIGHT[a.category] || a.uid.localeCompare(b.uid));
   for (const t of ordered) {
     const slotKey = `${t.routeId}:${t.dir}`;
     const candidates = locos.filter(l => l.station === t.from && l.type === traction(t) && l.role === role(t) && l.maxT >= t.consist.grossT);
-    const depFor = l => Math.max(t.departedMs, l.ready + config.couplingMin * 60000, slots.get(slotKey) || 0);
+    const depFor = l => {
+      let dep = Math.max(t.departedMs, l.ready + config.couplingMin * 60000, slots.get(slotKey) || 0);
+      const fixed = committed.filter(r => r.routeId === t.routeId && r.dir === t.dir && r.departure);
+      for (let pass = 0; pass <= constraints.length + fixed.length; pass++) {
+        let changed = false;
+        for (const c of constraints) {
+          const applies = c.locoId ? c.locoId === l.id : c.routeId === t.routeId;
+          if (applies && dep + t.arrivesMs - t.departedMs > c.from && dep - config.couplingMin * 60000 < c.until) {
+            dep = c.until + (c.locoId ? config.couplingMin * 60000 : 0); changed = true;
+          }
+        }
+        for (const r of fixed) if (Math.abs(dep - r.departure) < config.headwayMin * 60000) { dep = r.departure + config.headwayMin * 60000; changed = true; }
+        if (!changed) break;
+      }
+      return dep;
+    };
     // База: очередь по времени готовности. Кандидат: раннее отправление и
     // ближайшая к нему готовность, чтобы не занимать раньше времени свободную тягу.
     candidates.sort(optimized
