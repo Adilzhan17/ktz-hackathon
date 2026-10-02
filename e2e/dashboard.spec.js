@@ -582,3 +582,15 @@ test('network train card shows crew, locomotive, consist and technical character
   await expect(page.locator('.specs section[aria-label="Локомотив"]')).toContainText('До ТО');
   await expect(page.locator('.specs section[aria-label="Состав"]')).toContainText('Масса брутто');
 });
+
+test('statistics page: decisions, savings, per-route and live snapshot sections', async ({ page }) => {
+  await page.goto('/#/stats');
+  await expect(page.getByRole('heading', { name: 'Статистика работы модели', level: 1 })).toBeVisible();
+  await expect(page.locator('.kpi', { hasText: 'Решений за период' })).toBeVisible();
+  await expect.poll(async () => Number((await page.locator('.kpi', { hasText: 'Решений за период' }).locator('.kpi-value').innerText()).replace(/\D/g, ''))).toBeGreaterThan(500);
+  await expect(page.getByRole('heading', { name: 'Решения по типам' })).toBeVisible();
+  await expect(page.getByRole('img', { name: /Число решений по часам/ })).toBeVisible();
+  expect(await page.locator('h2', { hasText: 'По участкам' }).count()).toBe(1);
+  await page.getByRole('radio', { name: '6 часов' }).click();
+  await expect(page.getByRole('heading', { name: /Как работала модель/ })).toBeVisible();
+});

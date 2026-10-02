@@ -9,6 +9,7 @@ import { HowPage } from './how.js';
 import { StationPage } from './station.js';
 import { LogPage } from './log.js';
 import { ModelPage } from './model.js';
+import { StatsPage } from './stats.js';
 import { FleetPage } from './fleet.js';
 import { NetworkPage } from './network-map.js';
 import { useNetworkTotals } from './network-data.js';
@@ -20,13 +21,14 @@ const NAV = [
   { page: 'decisions', path: '/decisions', label: 'Решения', icon: 'scale' },
   { page: 'trains', path: '/trains', label: 'Поезда', icon: 'train-front' },
   { page: 'stations', path: '/stations', label: 'Станции', icon: 'building-2', also: ['station'] },
+  { page: 'stats', path: '/stats', label: 'Статистика', icon: 'trending-up' },
   { page: 'model', path: '/model', label: 'Решения модели', icon: 'lightbulb' },
   { page: 'log', path: '/log', label: 'Журнал', icon: 'list-checks' },
   { page: 'map', path: '/map', label: 'Карта', icon: 'route' },
   { page: 'fleet', path: '/fleet', label: 'Парк и сеть', icon: 'truck' },
   { page: 'how', path: '/how', label: 'Как это работает', icon: 'book-open' },
 ];
-const TITLES = { network: 'Сеть КТЖ', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
+const TITLES = { network: 'Сеть КТЖ', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', stats: 'Статистика', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
 function Nav({ page, onAbout, attention, mini, onMini }) {
   const more = useRef(null);
@@ -93,6 +95,7 @@ function App() {
     overview: html`<${Overview} data=${data} />`,
     decisions: html`<${DecisionsPage} data=${data} />`,
     model: html`<${ModelPage} data=${data} />`,
+    stats: html`<${StatsPage} data=${data} />`,
     how: html`<${HowPage} />`,
     trains: html`<${Trains} data=${data} />`,
     stations: html`<${Stations} data=${data} />`,

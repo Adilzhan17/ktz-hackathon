@@ -241,20 +241,21 @@ export function networkEvents(sim, nowMs, windowMin = 360) {
       if (dep + profile.total < from) continue;
       const number = s.base + 2 * (((m % s.copies) + s.copies) % s.copies);
       const base = { uid, number, category: s.cat, label: CATEGORIES[s.cat].label, routeId: s.route.id, route: s.route.name };
-      const push = (e, kind, station, text, forced = false) => {
+      const hh = hash(uid);
+      const push = (e, kind, station, text, forced = false, extra = null) => {
         const t = dep + e;
         if (t < from || t > now) return;
-        list.push({ ...base, at: Math.round((t - TZ) * 60000), kind, station, text, forced });
+        list.push({ ...base, at: Math.round((t - TZ) * 60000), kind, station, text, forced, ...extra });
       };
       const kindOf = reason => (/пропуск/.test(reason) ? 'yield' : /бригад/.test(reason) ? 'crew' : /неисправн/.test(reason) ? 'repair' : 'hold');
       push(0, 'send', origin, `Отправлен №${number} (${base.label.toLowerCase()}) со станции ${origin} в сторону ${dest}: путь свободен, маршрут задан`);
       s.stops.forEach((st, i) => {
         const leg = profile.legs[i], track = `путь ${leg.track}`;
         if (leg.planned) {
-          push(leg.t, 'accept', st.name, `Принят №${number} на станцию ${st.name}, ${track}: плановая стоянка ${leg.dwell} мин`);
+          push(leg.t, 'accept', st.name, `Принят №${number} на станцию ${st.name}, ${track}: плановая стоянка ${leg.dwell} мин`, false, { dwell: leg.dwell });
           if (leg.crew) {
             const h = Math.floor(leg.workedMin / 60), m = leg.workedMin % 60;
-            push(leg.t + 4, 'crew', st.name, `Смена локомотивной бригады №${number} на ${st.name}: прежняя отработала ${h} ч ${m} мин, уходит на отдых (12 ч), новая приняла поезд`);
+            push(leg.t + 4, 'crew', st.name, `Смена локомотивной бригады №${number} на ${st.name}: прежняя отработала ${h} ч ${m} мин, уходит на отдых (12 ч), новая приняла поезд`, false, { workedMin: leg.workedMin, savedMin: 31, savedWeighted: 31 * WEIGHT[s.cat] });
           }
           push(leg.t + leg.dwell, 'send', st.name, `Отправлен №${number} со станции ${st.name}${leg.crew ? ' после смены бригады' : ''}: путь свободен`);
         } else {
@@ -265,9 +266,12 @@ export function networkEvents(sim, nowMs, windowMin = 360) {
             repair: `№${number} остановлен на ${st.name}: неисправность, вызвана бригада осмотрщиков`,
             hold: `№${number} (${base.label.toLowerCase()}) задержан на ${st.name}: ${leg.reason}`,
           }[kind];
-          push(leg.t, kind, st.name, text, true);
+          const benW = s.cat === 'freight' ? (hh % 100 < 60 ? 10 : 2) : s.cat === 'container' ? 10 : 10;
+          const avoided = 12 + (hh >>> 4) % 14;
+          const saving = kind === 'yield' ? { savedMin: avoided, savedWeighted: Math.max(0, avoided * benW - leg.dwell * WEIGHT[s.cat]) } : null;
+          push(leg.t, kind, st.name, text, true, { dwell: leg.dwell, ...saving });
           const done = { yield: `приоритетный поезд пропущен`, crew: `бригада заменена`, repair: `неисправность устранена`, hold: `${leg.reason}: вопрос решён` }[kind];
-          push(leg.t + leg.dwell, 'resolved', st.name, `Проблема решена на ${st.name}: ${done}. №${number} отправлен после ${leg.dwell} мин простоя`);
+          push(leg.t + leg.dwell, 'resolved', st.name, `Проблема решена на ${st.name}: ${done}. №${number} отправлен после ${leg.dwell} мин простоя`, false, { dwell: leg.dwell, cause: kind });
         }
       });
       push(profile.total, 'accept', dest, `Принят №${number} на станцию назначения ${dest} (${s.route.name}), разгрузка и расформирование`);
