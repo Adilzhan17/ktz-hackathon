@@ -5,6 +5,7 @@ import { app, act, go, updateUi, useLiveNow, liveNow, clock } from './store.js';
 import { Badge, Button, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { attachNetwork, NetworkBar, useNetwork, KZ_BOUNDS } from './geo-network.js';
 import { FleetSummary } from './fleet.js';
+import { TrainSpecs } from './train-specs.js';
 import { networkTrains, networkStats } from './network-sim.js';
 import { useSim, inCorridor } from './network-data.js';
 import { placeTrains } from './trackmap.js';
@@ -235,6 +236,7 @@ export function NetworkPage({ data }) {
         <div class="net-map-wrap" ref=${wrap}><div ref=${container} class="net-map" role="region" aria-label="Карта железнодорожной сети Казахстана с поездами"></div>
           ${hovered && tip && html`<div class="net-tip" style=${`left:${Math.min(tip.x + 16, (wrap.current?.clientWidth || 800) - 270)}px;top:${Math.max(8, tip.y - 8)}px`} role="tooltip">
             <strong>№${hovered.number} · ${hovered.label}</strong><span>${hovered.route} (${hovered.dir === 'fwd' ? 'туда' : 'обратно'})</span>
+            <span>Бригада №${hovered.crew.number}: до смены ${Math.floor(hovered.crew.leftMin / 60)} ч ${hovered.crew.leftMin % 60} мин</span>
             <span>${hovered.loco.series} · ${hovered.loco.type} · ${hovered.wagons} ваг.${hovered.cargo ? ` · ${hovered.cargo}, ${hovered.loaded ? 'гружёный' : 'порожний'}` : ''}</span>
             <span class=${hovered.stopped && !hovered.planned ? 'bad' : ''}>${hovered.stopped ? `Стоит: ${hovered.reason}` : `${hovered.speedKmh} км/ч · пройдено ${Math.round(hovered.progress * 100)}%`}</span>
             <small>Прибытие в ${time(hovered.arrivesMs)}</small></div>`}
@@ -245,13 +247,7 @@ export function NetworkPage({ data }) {
               <div class="tc-head"><strong class="tc-num">№${picked.number}</strong><${Badge} tone=${picked.category === 'passenger' ? 'accent' : 'neutral'}>${picked.label}</${Badge}>
                 <${Button} size="sm" variant="ghost" icon="x" onClick=${() => { setSelected(null); updateUi({ selectedNetTrain: null }); }}>Снять</${Button}></div>
               <p class="tc-status">${picked.stopped ? `Стоит ${picked.planned ? '(плановая стоянка)' : '(вынужденно)'}: ${picked.reason}. Отправление через ${picked.restMin} мин.` : `В пути со скоростью ${picked.speedKmh} км/ч, пройдено ${Math.round(picked.progress * 100)}%.`}</p>
-              <div class="facts">
-                <div class="fact"><${Icon} name="route" size=${16} /><span>Маршрут</span><strong>${picked.from} → ${picked.to}</strong></div>
-                <div class="fact"><${Icon} name="ruler" size=${16} /><span>Пройдено</span><strong>${Math.round(picked.km)} из ${Math.round(picked.totalKm)} км</strong></div>
-                <div class="fact"><${Icon} name="truck" size=${16} /><span>Локомотив</span><strong>${picked.loco.series}, ${picked.loco.type}</strong></div>
-                <div class="fact"><${Icon} name="package" size=${16} /><span>${picked.category === 'passenger' ? 'Вагонов' : 'Состав'}</span><strong>${picked.wagons} ваг.${picked.cargo ? ` · ${picked.cargo}, ${picked.loaded ? 'гружёный' : 'порожний'}` : ''}</strong></div>
-                <div class="fact"><${Icon} name="clock" size=${16} /><span>Прибытие</span><strong>${time(picked.arrivesMs)}${picked.extraMin ? ` · задержка до ${picked.extraMin} мин` : ''}</strong></div>
-              </div>
+              <${TrainSpecs} t=${picked} />
               <${Button} icon="locate-fixed" onClick=${() => flyToTrain(picked)}>Показать на карте</${Button}></div>`
             : html`<div class="net-hint"><${Icon} name="mouse-pointer-click" size=${18} /><span>Наведите курсор на стрелку-поезд или нажмите на неё. Колёсико мыши — масштаб, перетаскивание — сдвиг. При приближении над поездами появляются подписи.</span></div>`}
           <section class="net-list" aria-labelledby="forced-title"><h3 id="forced-title">Вынужденные стоянки <${Badge} tone=${stats.forced ? 'danger' : 'neutral'}>${stats.forced}</${Badge}></h3>

@@ -559,12 +559,26 @@ test('network lists: all trains, all stations, journal and model decisions have 
   await expect(page.locator('tbody tr').first()).toContainText('Караганда');
   await page.goto('/#/log');
   await expect.poll(async () => page.locator('.timeline li').count()).toBeGreaterThan(50);
-  await page.getByRole('radio', { name: 'Вынужденные' }).click();
-  await expect(page.locator('.timeline li').first()).toContainText('остановлен');
+  await page.getByRole('radio', { name: 'Смена бригады' }).click();
+  await expect(page.locator('.timeline li').first()).toContainText('Смена локомотивной бригады');
   await page.goto('/#/model');
   await expect(page.getByRole('heading', { name: 'Решения модели', level: 1 })).toBeVisible();
   await expect(page.locator('.model-card').first()).toContainText('Почему так');
   await page.getByRole('radio', { name: 'Сократить' }).click();
+  await page.getByRole('tab', { name: 'Журнал решений' }).click();
+  await expect(page.locator('.timeline li').first()).toBeVisible();
   await page.getByRole('tab', { name: /Участок Караганда/ }).click();
   await expect(page.getByRole('heading', { name: 'Выбор варианта пропуска на участке' })).toBeVisible();
+});
+
+test('network train card shows crew, locomotive, consist and technical characteristics', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.net-kpis')).toBeVisible();
+  await page.goto('/#/trains');
+  await expect(page.getByRole('columnheader', { name: 'Бригада' })).toBeVisible();
+  await expect(page.locator('tbody tr').first()).toContainText('до смены');
+  await page.locator('tbody tr').first().getByRole('button', { name: 'На карте' }).click();
+  await expect(page.locator('.specs section[aria-label="Бригада"]')).toContainText('Отработано');
+  await expect(page.locator('.specs section[aria-label="Локомотив"]')).toContainText('До ТО');
+  await expect(page.locator('.specs section[aria-label="Состав"]')).toContainText('Масса брутто');
 });

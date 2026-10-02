@@ -64,18 +64,20 @@ export function NetworkTrains({ scopeTabs }) {
     ${failed ? html`<${Empty} icon="circle-alert" title="Не удалось загрузить маршруты сети">Обновите страницу.</${Empty}>`
       : loading ? html`<p class="muted pad">Загрузка поездов сети…</p>`
       : html`<div class="table-wrap"><table class="table responsive">
-        <thead><tr><th scope="col">№</th><th scope="col">Тип</th><th scope="col">Маршрут</th><th scope="col">Локомотив</th><th scope="col">Состав</th><th scope="col">Положение</th><th scope="col">Состояние</th><th scope="col">Прибытие</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
+        <thead><tr><th scope="col">№</th><th scope="col">Тип</th><th scope="col">Маршрут</th><th scope="col">Локомотив</th><th scope="col">Состав</th><th scope="col">Бригада</th><th scope="col">Тех. состояние</th><th scope="col">Положение</th><th scope="col">Состояние</th><th scope="col">Прибытие</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
         <tbody>${rows.slice(0, limit).map(t => html`<tr key=${t.uid}>
           <td data-label="№"><strong>${t.number}</strong></td>
           <td data-label="Тип"><${Badge} tone=${TONE[t.category]}>${t.label}</${Badge}></td>
           <td data-label="Маршрут"><div class="two"><span>${t.from} <${Icon} name="arrow-right" size=${13} class="inline" /> ${t.to}</span><small>${t.route}</small></div></td>
           <td data-label="Локомотив"><div class="two"><span>${t.loco.series}</span><small>${t.loco.type}</small></div></td>
           <td data-label="Состав"><div class="two"><span>${t.wagons} ваг.</span><small>${t.cargo ? `${t.cargo}, ${t.loaded ? 'гружёный' : 'порожний'}` : `≈ ${t.wagons * 52} мест`}</small></div></td>
+          <td data-label="Бригада"><div class="two"><span class=${t.crew.leftMin < 45 ? 'bad' : ''}>до смены ${Math.floor(t.crew.leftMin / 60)} ч ${String(t.crew.leftMin % 60).padStart(2, '0')} мин</span><small>№${t.crew.number} · смена: ${t.crew.nextChange}</small></div></td>
+          <td data-label="Тех. состояние"><div class="two"><span>${t.loco.conditionPct}%</span><small>${t.loco.resource.label} ${t.loco.resource.pct}% · до ТО ${t.loco.toInH} ч</small></div></td>
           <td data-label="Положение" class="num"><div class="two"><span>${Math.round(t.km)} из ${Math.round(t.totalKm)} км</span><small>${Math.round(t.progress * 100)}%</small></div></td>
           <td data-label="Состояние"><div class="two"><span class=${t.stopped && !t.planned ? 'bad' : ''}>${t.stopped ? `Стоит: ${t.station}` : `${t.speedKmh} км/ч`}</span><small>${t.stopped ? `${t.reason}${t.planned ? '' : `, ещё ${t.restMin} мин`}` : 'в пути'}</small></div></td>
           <td data-label="Прибытие" class="num">${time(t.arrivesMs)}</td>
           <td class="actions-cell"><${Button} size="sm" variant="ghost" icon="map-pin" onClick=${() => show(t)}>На карте</${Button}></td></tr>`)}
-          ${!rows.length && html`<tr><td colspan="9"><${Empty} icon="search" title="Ничего не найдено">Измените фильтры или поиск.</${Empty}></td></tr>`}</tbody></table></div>
+          ${!rows.length && html`<tr><td colspan="11"><${Empty} icon="search" title="Ничего не найдено">Измените фильтры или поиск.</${Empty}></td></tr>`}</tbody></table></div>
         <div class="table-foot">Показано ${Math.min(limit, rows.length)} из ${fmt(rows.length)} (всего на сети ${fmt(trains.length)})
           ${rows.length > limit && html`<${Button} size="sm" onClick=${() => setLimit(limit + PAGE)}>Показать ещё ${Math.min(PAGE, rows.length - limit)}</${Button}>`}</div>`}
   </section>`;

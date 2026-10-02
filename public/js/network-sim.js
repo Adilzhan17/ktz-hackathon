@@ -83,13 +83,21 @@ function profileOf(service, uid) {
   const legs = []; // [tArrive, km, dwell, reason, planned]
   let t = 0, km = 0;
   const speed = service.route.km / service.run * 60; // км/ч в движении
-  for (const s of stops) {
-    t += (s.km - km) / speed * 60; km = s.km;
-    legs.push({ t, km, dwell: s.dwell, reason: s.reason, planned: s.planned, name: s.name });
-    t += s.dwell;
-  }
+  const pre = (h >>> 3) % 200;                 // сколько бригада уже отработала к отправлению, мин
+  const limit = 330 + ((h >>> 11) % 90);       // предел непрерывной работы бригады, мин
+  let worked = pre;
+  stops.forEach((s, i) => {
+    const travel = (s.km - km) / speed * 60;
+    t += travel; worked += travel; km = s.km;
+    const nextTravel = ((stops[i + 1]?.km ?? service.route.km) - s.km) / speed * 60;
+    let dwell = s.dwell, crew = false, reason = s.reason;
+    const workedHere = Math.round(worked);
+    if (worked + nextTravel > limit) { crew = true; dwell += 14; worked = 0; if (s.planned) reason = 'смена локомотивной бригады'; } else worked += dwell;
+    legs.push({ t, km, dwell, reason, planned: s.planned, name: s.name, crew, workedMin: workedHere, track: 1 + ((h >>> (i + 5)) % 6) });
+    t += dwell;
+  });
   t += (service.route.km - km) / speed * 60;
-  const profile = { legs, total: t, speed, extra: holdAt >= 0 ? extra : 0, holdAt };
+  const profile = { legs, total: t, speed, extra: holdAt >= 0 ? extra : 0, holdAt, pre, limit };
   if (profiles.size > 8000) profiles.clear();
   profiles.set(uid, profile);
   return profile;
@@ -124,6 +132,43 @@ const locoOf = (cat, route, h) => {
   return h % 20 < 15 ? { series: 'ТЭ33А', type: 'тепловоз' } : h % 20 < 18 ? { series: '2ТЭ25КМ', type: 'тепловоз' } : { series: '2ТЭ10МК', type: 'тепловоз' };
 };
 
+
+const LOCO_SPECS = {
+  KZ4AT: { kw: 7200, massT: 123 }, KZ8A: { kw: 8800, massT: 192 }, 'ВЛ80С': { kw: 6520, massT: 192 },
+  'ТЭП33А': { kw: 2950, massT: 138 }, 'ТЭ33А': { kw: 3000, massT: 138 }, '2ТЭ25КМ': { kw: 5100, massT: 288 }, '2ТЭ10МК': { kw: 4400, massT: 276 },
+};
+
+/** Подробные характеристики рейса в момент e (мин от отправления): бригада, локомотив, состав, техсостояние. */
+function characteristics(service, uid, profile, e, st, h, loco, wagons, loaded) {
+  const cat = service.cat, legs = profile.legs;
+  // бригада
+  let lastChange = null, next = null;
+  for (const leg of legs) if (leg.crew) { if (leg.t + leg.dwell <= e) lastChange = leg; else if (!next) next = leg; }
+  const worked = lastChange ? e - (lastChange.t + lastChange.dwell) : profile.pre + e;
+  const crew = {
+    number: 1000 + (h % 8000), workedMin: Math.round(worked), limitMin: Math.round(profile.limit), leftMin: Math.max(0, Math.round(profile.limit - worked)),
+    nextChange: next ? next.name : 'на конечной станции', changing: Boolean(st.stopped && legs.some(l => l.crew && e >= l.t && e <= l.t + l.dwell)),
+    restAfterH: 12, size: cat === 'passenger' ? 'машинист, помощник, бригада проводников' : 'машинист, помощник',
+  };
+  // локомотив
+  const spec = LOCO_SPECS[loco.series] || { kw: 3000, massT: 138 };
+  const electric = loco.type === 'электровоз';
+  const sinceToH = (h >>> 5) % (cat === 'container' ? 48 : 96);
+  const toIntervalH = cat === 'container' ? 48 : 72;
+  const resource = electric ? { label: 'Нагрузка тяги', pct: Math.round(55 + ((h >>> 9) % 35) * (st.stopped ? 0.3 : 1)) }
+    : { label: 'Топливо', pct: Math.max(8, Math.round(100 - ((h >>> 9) % 45) - e / Math.max(1, profile.total) * 40)) };
+  const locoInfo = { ...loco, kw: spec.kw, massT: spec.massT, resource, conditionPct: 82 + ((h >>> 13) % 17), sinceToH, toIntervalH, toInH: Math.max(0, toIntervalH - sinceToH), maxKmh: cat === 'passenger' ? (electric ? 120 : 100) : cat === 'container' ? 90 : 80 };
+  // состав
+  const tare = cat === 'passenger' ? 52 : cat === 'container' ? 22 : 24;
+  const payload = cat === 'passenger' ? 0 : loaded ? 58 + ((h >>> 3) % 8) : 0;
+  const netT = wagons * payload, grossT = Math.round(wagons * (tare + payload) + spec.massT);
+  const consist = { wagons, lengthM: Math.round(wagons * (cat === 'passenger' ? 24.5 : 14.6) + 21), tareT: Math.round(wagons * tare), netT, grossT,
+    axleLoadT: cat === 'passenger' ? 18 : loaded ? 23.5 : 21, loadPct: cat === 'passenger' ? Math.min(99, 38 + (h >>> 7) % 58) : loaded ? 88 + (h >>> 7) % 12 : 0,
+    brakeCheckMin: -(10 + (h >>> 2) % 20), braking: loaded ? 'грузовой режим' : 'порожний режим' };
+  if (cat === 'passenger') consist.braking = 'пассажирский режим';
+  return { crew, loco: locoInfo, consist };
+}
+
 /** Все поезда сети в момент nowMs. */
 export function networkTrains(sim, nowMs, { exclude } = {}) {
   const t = nowMs / 60000 + TZ;
@@ -152,7 +197,7 @@ export function networkTrains(sim, nowMs, { exclude } = {}) {
         speedKmh: Math.round(st.speed), stopped: st.stopped, planned: Boolean(st.stopped && st.planned), reason: st.stopped ? st.reason : '', station: st.stopped ? st.station : '',
         restMin: st.stopped ? Math.round(st.restMin) : 0, delayMin: delayNow, extraMin: profile.extra,
         departedMs: (dep - TZ) * 60000, arrivesMs: Math.round((dep - TZ + profile.total) * 60000),
-        loco: locoOf(s.cat, s.route, h), wagons: s.cat === 'passenger' ? 8 + (h % 9) : 45 + (h % 25),
+        ...(() => { const lc = locoOf(s.cat, s.route, h), wg = s.cat === 'passenger' ? 8 + (h % 9) : 45 + (h % 25), ch = characteristics(s, uid, profile, e, st, h, lc, wg, loaded); return { loco: ch.loco, wagons: wg, crew: ch.crew, consist: ch.consist }; })(),
         cargo: s.cat === 'container' ? 'контейнеры' : s.cat === 'freight' ? CARGO[h % CARGO.length] : null, loaded,
       });
     }
@@ -201,18 +246,31 @@ export function networkEvents(sim, nowMs, windowMin = 360) {
         if (t < from || t > now) return;
         list.push({ ...base, at: Math.round((t - TZ) * 60000), kind, station, text, forced });
       };
-      push(0, 'depart', origin, `№${number} (${base.label.toLowerCase()}) отправился со станции ${origin} в сторону ${dest}`);
+      const kindOf = reason => (/пропуск/.test(reason) ? 'yield' : /бригад/.test(reason) ? 'crew' : /неисправн/.test(reason) ? 'repair' : 'hold');
+      push(0, 'send', origin, `Отправлен №${number} (${base.label.toLowerCase()}) со станции ${origin} в сторону ${dest}: путь свободен, маршрут задан`);
       s.stops.forEach((st, i) => {
-        const leg = profile.legs[i];
+        const leg = profile.legs[i], track = `путь ${leg.track}`;
         if (leg.planned) {
-          push(leg.t, 'stop', st.name, `№${number} прибыл на станцию ${st.name}: плановая стоянка ${leg.dwell} мин`);
-          push(leg.t + leg.dwell, 'depart', st.name, `№${number} отправился со станции ${st.name}`);
+          push(leg.t, 'accept', st.name, `Принят №${number} на станцию ${st.name}, ${track}: плановая стоянка ${leg.dwell} мин`);
+          if (leg.crew) {
+            const h = Math.floor(leg.workedMin / 60), m = leg.workedMin % 60;
+            push(leg.t + 4, 'crew', st.name, `Смена локомотивной бригады №${number} на ${st.name}: прежняя отработала ${h} ч ${m} мин, уходит на отдых (12 ч), новая приняла поезд`);
+          }
+          push(leg.t + leg.dwell, 'send', st.name, `Отправлен №${number} со станции ${st.name}${leg.crew ? ' после смены бригады' : ''}: путь свободен`);
         } else {
-          push(leg.t, 'forced', st.name, `№${number} (${base.label.toLowerCase()}) остановлен на станции ${st.name}: ${leg.reason}`, true);
-          push(leg.t + leg.dwell, 'resume', st.name, `№${number} продолжил движение со станции ${st.name} после стоянки ${leg.dwell} мин`);
+          const kind = kindOf(leg.reason);
+          const text = {
+            yield: `№${number} (${base.label.toLowerCase()}) уступил путь приоритетному поезду на ${st.name}: решение «пропустить»`,
+            crew: `№${number} задержан на ${st.name}: бригада вышла за предел работы, ожидает замену`,
+            repair: `№${number} остановлен на ${st.name}: неисправность, вызвана бригада осмотрщиков`,
+            hold: `№${number} (${base.label.toLowerCase()}) задержан на ${st.name}: ${leg.reason}`,
+          }[kind];
+          push(leg.t, kind, st.name, text, true);
+          const done = { yield: `приоритетный поезд пропущен`, crew: `бригада заменена`, repair: `неисправность устранена`, hold: `${leg.reason}: вопрос решён` }[kind];
+          push(leg.t + leg.dwell, 'resolved', st.name, `Проблема решена на ${st.name}: ${done}. №${number} отправлен после ${leg.dwell} мин простоя`);
         }
       });
-      push(profile.total, 'arrive', dest, `№${number} прибыл на станцию ${dest} (${s.route.name})`);
+      push(profile.total, 'accept', dest, `Принят №${number} на станцию назначения ${dest} (${s.route.name}), разгрузка и расформирование`);
     }
   }
   list.sort((a, b) => b.at - a.at);
