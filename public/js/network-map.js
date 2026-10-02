@@ -5,7 +5,8 @@ import { app, act, go, updateUi, useLiveNow, liveNow, clock } from './store.js';
 import { Badge, Button, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { attachNetwork, NetworkBar, useNetwork, KZ_BOUNDS } from './geo-network.js';
 import { FleetSummary } from './fleet.js';
-import { prepare, networkTrains, networkStats } from './network-sim.js';
+import { networkTrains, networkStats } from './network-sim.js';
+import { useSim, inCorridor } from './network-data.js';
 import { placeTrains } from './trackmap.js';
 import { coordinateAt, indexOfLocation, prepareGeometry } from './geo-position.js';
 import { CORRIDOR } from '/engine/rail-corridor.js';
@@ -17,25 +18,7 @@ const SPEEDS = [{ value: 1, label: 'Реальное' }, { value: 60, label: '×
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = n => n.toLocaleString('ru-RU');
 
-let simLoading;
-export function useSim() {
-  const [sim, setSim] = useState(null);
-  useEffect(() => { simLoading ||= fetch('/data/kz-routes.json').then(r => r.json()).then(prepare); simLoading.then(setSim).catch(() => setSim({ error: true })); }, []);
-  return sim;
-}
-
-// Поезда детальной модели участка рисуются отдельно, поэтому сетевые рядом с участком скрываем.
-const corridorCells = new Set();
-for (const seg of CORRIDOR.segments) for (const [lat, lon] of seg) for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) corridorCells.add(`${Math.floor(lat / 0.012) + di}:${Math.floor(lon / 0.012) + dj}`);
-const inCorridor = (lat, lon) => corridorCells.has(`${Math.floor(lat / 0.012)}:${Math.floor(lon / 0.012)}`);
 const matches = (t, filter) => filter === 'all' || (filter === 'stopped' ? t.stopped && !t.planned : t.category === filter);
-
-/** Сколько поездов сейчас на сети (для строки состояния в шапке). */
-export function useNetworkTotals() {
-  const sim = useSim();
-  const now = useLiveNow(0.2);
-  return useMemo(() => (sim && !sim.error ? networkStats(networkTrains(sim, now, { exclude: inCorridor })) : null), [sim, Math.floor(now / 5000)]);
-}
 
 const DISPLAY_SPEEDS = [{ value: 1, label: 'Реальное' }, { value: 60, label: '×60' }, { value: 300, label: '×300' }, { value: 1200, label: '×1200' }];
 const LABELS = [{ value: 'auto', label: 'Подписи: авто' }, { value: 'all', label: 'Все' }, { value: 'none', label: 'Нет' }];
@@ -124,7 +107,7 @@ export function NetworkPage({ data }) {
   const container = useRef(null), scene = useRef(null), wrap = useRef(null);
   const [filter, setFilter] = useState('all');
   const [labels, setLabels] = useState('auto');
-  const [selected, setSelected] = useState(null);
+  const [selected, setSelected] = useState(app.ui.selectedNetTrain || null);
   const [hover, setHover] = useState(null);
   const [background, setBackground] = useState('loading');
   const [speed, setSpeedState] = useState(300);
@@ -218,6 +201,11 @@ export function NetworkPage({ data }) {
     return () => { alive = false; clearTimeout(timeout); cancelAnimationFrame(raf); canvas.destroy(); network.destroy(); scene.current = null; map.remove(); };
   }, []);
 
+  const focused = useRef(false);
+  useEffect(() => {
+    const t = !focused.current && selected && trains.find(x => x.uid === selected);
+    if (t && scene.current) { focused.current = true; scene.current.flyTo(t.lat, t.lon, 8); }
+  });
   const flyToTrain = t => { setSelected(t.uid); updateUi({ selectedNetTrain: t.uid }); scene.current?.flyTo(t.lat, t.lon, 8); };
   const netTime = netNow();
   return html`<${PageHeader} title="Сеть КТЖ в реальном времени"

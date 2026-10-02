@@ -75,3 +75,27 @@
 .net-chip-top { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); text-decoration: none; font-size: var(--text-sm); white-space: nowrap; }
 .net-chip-top:hover { border-color: var(--accent); }
 @media (max-width: 900px) { .net-chip-top { display: none; } }
+.filter-row { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; margin: 10px 0; }
+.filter-select select { min-width: 170px; }
+.mini-kpis { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 8px 0 12px; color: var(--text-3); font-size: var(--text-sm); }
+.mini-kpis strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.table-foot { display: flex; align-items: center; gap: 12px; padding-top: 10px; }
+.pad { padding: 16px 0; }
+.model-card { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.model-card header { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.model-card h3 { margin: 0; font-size: var(--text-md, 1rem); }
+.model-list { display: grid; gap: 12px; margin-top: 12px; }
+.opt-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.opt-table th, .opt-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.opt-table tr.pick { background: var(--accent-bg); }
+.opt-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.cost-bar { display: block; height: 6px; border-radius: 3px; background: var(--accent); min-width: 2px; }
+.model-why { margin: 0; display: flex; gap: 8px; align-items: flex-start; color: var(--text-2, var(--text)); }
+.filter-row > *, .toolbar > * { max-width: 100%; min-width: 0; }
+.filter-row .segmented { overflow-x: auto; }
+.tabs { overflow-x: auto; max-width: 100%; }
+@media (max-width: 700px) { .filter-select, .filter-select select { width: 100%; } .toolbar .search { width: 100%; } }
+.panel, .tab-panel { min-width: 0; }
+.toolbar { max-width: 100%; }
+@media (max-width: 700px) { .search, .search input { min-width: 0; width: 100%; } .segmented { max-width: 100%; } }
+.tab-panel { grid-template-columns: minmax(0, 1fr); }

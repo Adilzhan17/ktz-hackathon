@@ -6,6 +6,8 @@ import { Button, Badge, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { Gantt } from './gantt.js';
 import { TrackMap } from './trackmap.js';
 import { DispatcherPanel } from './panel.js';
+import { NetworkTrains, NetworkStations } from './network-lists.js';
+import { Tabs } from './ui.js';
 import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
 
 const stationName = (data, i) => data.stations[i].name;
@@ -86,7 +88,7 @@ const SORTS = {
 };
 const FILTERS = [{ value: 'all', label: 'Все' }, { value: 'late', label: 'Опаздывают' }, { value: 'service', label: 'ТО' }, { value: 'broken', label: 'Поломки' }];
 
-export function Trains({ data }) {
+function CorridorTrains({ data, scopeTabs }) {
   const [sort, setSort] = useState({ key: 'delay', dir: -1 });
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
@@ -109,6 +111,7 @@ export function Trains({ data }) {
   return html`<${PageHeader} title="Поезда участка" subtitle=${`${data.trains.length} поездов в расписании на ближайшие сутки · приоритет определяет очерёдность при конфликтах`}
       actions=${html`<${Button} icon="download" onClick=${exportCsv}>Выгрузить CSV</${Button}>`} />
     <section class="panel">
+      ${scopeTabs}
       <div class="toolbar">
         <label class="search"><${Icon} name="search" size=${16} /><span class="sr-only">Поиск поезда</span>
           <input type="search" placeholder="Номер, тип, локомотив или станция" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
@@ -141,9 +144,10 @@ export function Trains({ data }) {
     </section>`;
 }
 
-export function Stations({ data }) {
+function CorridorStations({ data, scopeTabs }) {
   const now = useLiveNow(4);
   return html`<${PageHeader} title="Станции" subtitle="Грузовая работа, подъездные пути и подход вагонов по каждой станции" />
+    ${scopeTabs}
     <p class="note station-explainer">Занятость — вагоны на подъездных путях. Проходящие поезда и группы, ожидающие команды «Принять», в неё не входят. После обработки вагоны занимают путь до уборки.</p>
     <div class="station-grid">
       ${data.stations.map(s => {
@@ -164,4 +168,27 @@ export function Stations({ data }) {
           </dl></a>`;
       })}
     </div>`;
+}
+
+function scopeTabs(scope, setScope, networkCount, corridorCount) {
+  return html`<${Tabs} label="Охват" value=${scope} idPrefix="scope" onChange=${setScope}
+    tabs=${[{ value: 'network', label: 'Вся сеть КТЖ', count: networkCount }, { value: 'corridor', label: 'Участок Караганда — Мойынты', count: corridorCount }]} />`;
+}
+
+export function Trains({ data }) {
+  const [scope, setScope] = useState('network');
+  const tabs = html`<div id="scope-panel">${scopeTabs(scope, setScope, null, data.trains.length)}</div>`;
+  return scope === 'network'
+    ? html`<${PageHeader} title="Поезда сети" subtitle="Все поезда КТЖ на линии прямо сейчас: поиск по городу, станции и участку, фильтры по типу, состоянию и тяге" />
+        <${NetworkTrains} scopeTabs=${tabs} />`
+    : html`<${CorridorTrains} data=${data} scopeTabs=${tabs} />`;
+}
+
+export function Stations({ data }) {
+  const [scope, setScope] = useState('network');
+  const tabs = html`<div id="scope-panel">${scopeTabs(scope, setScope, null, data.stations.length)}</div>`;
+  return scope === 'network'
+    ? html`<${PageHeader} title="Станции сети" subtitle="Все станции и остановочные пункты Казахстана с привязкой к участкам и ближайшими поездами" />
+        <${NetworkStations} scopeTabs=${tabs} />`
+    : html`<${CorridorStations} data=${data} scopeTabs=${tabs} />`;
 }

@@ -8,8 +8,10 @@ import { Overview, DecisionsPage, Trains, Stations } from './pages.js';
 import { HowPage } from './how.js';
 import { StationPage } from './station.js';
 import { LogPage } from './log.js';
+import { ModelPage } from './model.js';
 import { FleetPage } from './fleet.js';
-import { NetworkPage, useNetworkTotals } from './network-map.js';
+import { NetworkPage } from './network-map.js';
+import { useNetworkTotals } from './network-data.js';
 import { QuickSearch } from './search.js';
 
 const NAV = [
@@ -18,12 +20,13 @@ const NAV = [
   { page: 'decisions', path: '/decisions', label: 'Решения', icon: 'scale' },
   { page: 'trains', path: '/trains', label: 'Поезда', icon: 'train-front' },
   { page: 'stations', path: '/stations', label: 'Станции', icon: 'building-2', also: ['station'] },
+  { page: 'model', path: '/model', label: 'Решения модели', icon: 'lightbulb' },
   { page: 'log', path: '/log', label: 'Журнал', icon: 'list-checks' },
   { page: 'map', path: '/map', label: 'Карта', icon: 'route' },
   { page: 'fleet', path: '/fleet', label: 'Парк и сеть', icon: 'truck' },
   { page: 'how', path: '/how', label: 'Как это работает', icon: 'book-open' },
 ];
-const TITLES = { network: 'Сеть КТЖ', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
+const TITLES = { network: 'Сеть КТЖ', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
 function Nav({ page, onAbout, attention, mini, onMini }) {
   const more = useRef(null);
@@ -89,6 +92,7 @@ function App() {
     network: html`<${NetworkPage} data=${data} />`,
     overview: html`<${Overview} data=${data} />`,
     decisions: html`<${DecisionsPage} data=${data} />`,
+    model: html`<${ModelPage} data=${data} />`,
     how: html`<${HowPage} />`,
     trains: html`<${Trains} data=${data} />`,
     stations: html`<${Stations} data=${data} />`,

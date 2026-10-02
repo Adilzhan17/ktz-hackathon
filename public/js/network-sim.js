@@ -85,7 +85,7 @@ function profileOf(service, uid) {
   const speed = service.route.km / service.run * 60; // км/ч в движении
   for (const s of stops) {
     t += (s.km - km) / speed * 60; km = s.km;
-    legs.push({ t, km, dwell: s.dwell, reason: s.reason, planned: s.planned });
+    legs.push({ t, km, dwell: s.dwell, reason: s.reason, planned: s.planned, name: s.name });
     t += s.dwell;
   }
   t += (service.route.km - km) / speed * 60;
@@ -100,7 +100,7 @@ function stateAt(profile, e, L) {
   let prevT = 0, prevKm = 0;
   for (const leg of profile.legs) {
     if (e < leg.t) return { km: prevKm + (leg.km - prevKm) * ((e - prevT) / (leg.t - prevT)), stopped: false, speed: profile.speed };
-    if (e <= leg.t + leg.dwell) return { km: leg.km, stopped: true, reason: leg.reason, planned: leg.planned, speed: 0, restMin: leg.t + leg.dwell - e, waitedMin: e - leg.t };
+    if (e <= leg.t + leg.dwell) return { km: leg.km, stopped: true, station: leg.name, reason: leg.reason, planned: leg.planned, speed: 0, restMin: leg.t + leg.dwell - e, waitedMin: e - leg.t };
     prevT = leg.t + leg.dwell; prevKm = leg.km;
   }
   return { km: Math.min(L, prevKm + (L - prevKm) * ((e - prevT) / Math.max(1e-6, profile.total - prevT))), stopped: false, speed: profile.speed };
@@ -149,7 +149,7 @@ export function networkTrains(sim, nowMs, { exclude } = {}) {
       out.push({
         uid, number, category: s.cat, label: CATEGORIES[s.cat].label, routeId: s.route.id, route: s.route.name, from, to, dir: s.dir,
         km: Math.round(st.km * 10) / 10, totalKm: s.route.km, progress: st.km / s.route.km, lat: pos.lat, lon: pos.lon, heading,
-        speedKmh: Math.round(st.speed), stopped: st.stopped, planned: Boolean(st.stopped && st.planned), reason: st.stopped ? st.reason : '',
+        speedKmh: Math.round(st.speed), stopped: st.stopped, planned: Boolean(st.stopped && st.planned), reason: st.stopped ? st.reason : '', station: st.stopped ? st.station : '',
         restMin: st.stopped ? Math.round(st.restMin) : 0, delayMin: delayNow, extraMin: profile.extra,
         departedMs: (dep - TZ) * 60000, arrivesMs: Math.round((dep - TZ + profile.total) * 60000),
         loco: locoOf(s.cat, s.route, h), wagons: s.cat === 'passenger' ? 8 + (h % 9) : 45 + (h % 25),
@@ -174,4 +174,97 @@ export function networkStats(trains) {
     wagons: trains.reduce((n, t) => n + t.wagons, 0),
     passengers: trains.filter(t => t.category === 'passenger').reduce((n, t) => n + t.wagons * 52, 0),
   };
+}
+
+const WEIGHT = { passenger: 10, container: 2, freight: 1 }; // как в модели участка: пассажирские ×10, транзит и контейнерные ×2, прочие ×1
+const absKm = t => (t.dir === 'fwd' ? t.km : t.totalKm - t.km);
+const eventMemo = { key: '', list: [] };
+
+/** События сети за последние windowMin минут: отправления, прибытия, стоянки (по расписанию и вынужденные). */
+export function networkEvents(sim, nowMs, windowMin = 360) {
+  const key = `${sim.services.length}|${Math.floor(nowMs / 60000)}|${windowMin}`;
+  if (eventMemo.key === key) return eventMemo.list;
+  const now = nowMs / 60000 + TZ, from = now - windowMin;
+  const list = [];
+  for (const s of sim.services) {
+    const mFrom = Math.floor((from - s.tMax - s.phase) / s.period), mTo = Math.floor((now - s.phase) / s.period);
+    const origin = s.dir === 'fwd' ? s.route.from : s.route.to, dest = s.dir === 'fwd' ? s.route.to : s.route.from;
+    for (let m = mFrom; m <= mTo; m++) {
+      const dep = s.phase + m * s.period;
+      if (dep > now) continue;
+      const uid = `${s.id}@${m}`, profile = profileOf(s, uid);
+      if (dep + profile.total < from) continue;
+      const number = s.base + 2 * (((m % s.copies) + s.copies) % s.copies);
+      const base = { uid, number, category: s.cat, label: CATEGORIES[s.cat].label, routeId: s.route.id, route: s.route.name };
+      const push = (e, kind, station, text, forced = false) => {
+        const t = dep + e;
+        if (t < from || t > now) return;
+        list.push({ ...base, at: Math.round((t - TZ) * 60000), kind, station, text, forced });
+      };
+      push(0, 'depart', origin, `№${number} (${base.label.toLowerCase()}) отправился со станции ${origin} в сторону ${dest}`);
+      s.stops.forEach((st, i) => {
+        const leg = profile.legs[i];
+        if (leg.planned) {
+          push(leg.t, 'stop', st.name, `№${number} прибыл на станцию ${st.name}: плановая стоянка ${leg.dwell} мин`);
+          push(leg.t + leg.dwell, 'depart', st.name, `№${number} отправился со станции ${st.name}`);
+        } else {
+          push(leg.t, 'forced', st.name, `№${number} (${base.label.toLowerCase()}) остановлен на станции ${st.name}: ${leg.reason}`, true);
+          push(leg.t + leg.dwell, 'resume', st.name, `№${number} продолжил движение со станции ${st.name} после стоянки ${leg.dwell} мин`);
+        }
+      });
+      push(profile.total, 'arrive', dest, `№${number} прибыл на станцию ${dest} (${s.route.name})`);
+    }
+  }
+  list.sort((a, b) => b.at - a.at);
+  eventMemo.key = key; eventMemo.list = list;
+  return list;
+}
+
+/**
+ * Разбор вынужденных стоянок сети. Для каждой стоянки ищем более приоритетный поезд поблизости, ради которого
+ * мог быть задержан этот, и сравниваем взвешенную потерю: держать поезд (вес × его простой) или отправить
+ * и заставить ждать приоритетный. Вес — как в модели участка.
+ */
+export function networkDecisions(trains) {
+  const byRoute = new Map();
+  for (const t of trains) { if (!byRoute.has(t.routeId)) byRoute.set(t.routeId, []); byRoute.get(t.routeId).push(t); }
+  const out = [];
+  for (const t of trains) {
+    if (!t.stopped || t.planned) continue;
+    const holdMin = Math.max(1, t.delayMin + t.restMin);
+    const ownCost = holdMin * WEIGHT[t.category];
+    const mine = absKm(t);
+    const traffic = /пропуск|свободного пути/.test(t.reason);
+    let who = null;
+    if (traffic) {
+      for (const o of byRoute.get(t.routeId) || []) {
+        if (o.uid === t.uid || WEIGHT[o.category] <= WEIGHT[t.category] || (o.stopped && !o.planned)) continue;
+        const there = absKm(o), gap = Math.abs(there - mine);
+        const opposite = o.dir !== t.dir, approaching = opposite ? (t.dir === 'fwd' ? there > mine : there < mine) : (t.dir === 'fwd' ? there < mine : there > mine);
+        if (!approaching || gap > 160) continue;
+        if (!who || gap < who.gap) who = { train: o, gap: Math.round(gap), opposite };
+      }
+    }
+    let options, chosen, verdict, why;
+    if (who) {
+      const o = who.train;
+      const wait = Math.max(10, Math.round(who.gap / Math.max(30, o.speedKmh || 60) * 60 * 0.35));
+      const otherCost = wait * WEIGHT[o.category];
+      options = [
+        { id: 'hold', name: `Задержать №${t.number} на станции`, detail: `${t.label.toLowerCase()} стоит ${holdMin} мин × вес ${WEIGHT[t.category]}`, cost: ownCost },
+        { id: 'go', name: `Отправить №${t.number}, пропустить после него №${o.number}`, detail: `${o.label.toLowerCase()} ждёт около ${wait} мин × вес ${WEIGHT[o.category]}`, cost: otherCost },
+      ];
+      chosen = ownCost <= otherCost ? 'hold' : 'go';
+      verdict = chosen === 'hold' ? 'justified' : 'shorten';
+      why = chosen === 'hold'
+        ? `Потеря ${ownCost} против ${otherCost}: выгоднее задержать ${t.label.toLowerCase()} поезд и пропустить ${who.opposite ? 'встречный' : 'догоняющий'} ${o.label.toLowerCase()} №${o.number} (${who.gap} км до станции). Приоритетный поезд не теряет ход.`
+        : `Потеря ${ownCost} против ${otherCost}: стоянка слишком дорогая для вашего веса поезда. Стоит сократить простой и отправить №${t.number} вперёд — суммарные потери упадут на ${ownCost - otherCost}.`;
+    } else {
+      options = [{ id: 'hold', name: `Задержать №${t.number} на станции`, detail: `стоит ${holdMin} мин × вес ${WEIGHT[t.category]}`, cost: ownCost }];
+      chosen = 'hold'; verdict = 'technical';
+      why = traffic ? 'Приоритетных поездов рядом нет, ожидание вызвано занятостью пути; решение диспетчера не требуется.' : `Причина технологическая («${t.reason}»): задержка не связана с очерёдностью пропуска, поезд отправится после её устранения.`;
+    }
+    out.push({ id: t.uid, train: t, station: t.station, who: who?.train || null, gap: who?.gap ?? null, options, chosen, verdict, why, holdMin, ownCost });
+  }
+  return out.sort((a, b) => b.ownCost - a.ownCost);
 }

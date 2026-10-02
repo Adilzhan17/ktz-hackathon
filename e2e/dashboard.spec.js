@@ -125,6 +125,7 @@ test('keyboard focus survives an action (no full re-render)', async ({ page, req
 test('trains page: filter, sort, show on the map', async ({ page, request }) => {
   const s = await getState(request);
   await page.goto('/#/trains');
+  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
   await expect(page.locator('tbody tr')).toHaveCount(s.trains.length);
   await page.getByRole('radio', { name: 'Пассажирские' }).click();
   await expect(page.locator('tbody tr')).toHaveCount(s.trains.filter(t => t.category === 'passenger').length);
@@ -140,6 +141,7 @@ test('trains page: maintenance filter and characteristics columns', async ({ pag
   const s = await getState(request);
   const due = s.trains.filter(t => ['на ТО', 'ТО перед рейсом', 'скоро ТО'].includes(t.techState.status)).length;
   await page.goto('/#/trains');
+  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
   await page.getByRole('radio', { name: 'ТО', exact: true }).click();
   await expect(page.locator('tbody tr')).toHaveCount(due);
   await expect(page.getByRole('columnheader', { name: /ТО \/ состояние/ })).toBeVisible();
@@ -147,6 +149,7 @@ test('trains page: maintenance filter and characteristics columns', async ({ pag
 
 test('station list, deep link and unknown station', async ({ page }) => {
   await page.goto('/#/stations');
+  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
   await page.getByRole('link', { name: /Мойынты/ }).click();
   await expect(page).toHaveURL(/#\/station\/J/);
   await page.goto('/#/station/ZZ');
@@ -217,6 +220,7 @@ test('how-it-works page: animated demos, stepper, cases, sandbox does not touch 
 
 test('icons morph: sort chevron changes its path when direction flips', async ({ page }) => {
   await page.goto('/#/trains');
+  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
   const th = page.getByRole('columnheader', { name: /Опоздание/ });
   const d = () => th.locator('svg path').getAttribute('d');
   const before = await d();
@@ -448,6 +452,7 @@ test('station cards and map agree on occupied wagons and the arrival queue', asy
   const st = data.stations.find(x => x.id === g.stationId);
   const waiting = data.groups.filter(x => x.stationId === st.id && x.status !== 'arrived' && x.etaAt <= data.now).length;
   await page.goto('/#/stations');
+  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
   const card = page.locator(`[data-station="${st.id}"]`);
   await expect(card.locator('.sc-occupancy')).toContainText(`${st.occupied} / ${st.capacity} ваг.`);
   await expect(card.locator('.sc-stats > div').filter({ hasText: 'Ждут приёма' })).toContainText(`${waiting} гр.`);
@@ -539,4 +544,27 @@ test('network page: forced stops list, train card and fleet summary', async ({ p
   }
   await page.getByRole('button', { name: 'Открыть обстановку' }).click();
   await expect(page).toHaveURL(/#\/overview/);
+});
+
+test('network lists: all trains, all stations, journal and model decisions have filters', async ({ page }) => {
+  await page.goto('/#/trains');
+  await expect(page.getByRole('heading', { name: 'Поезда сети', level: 1 })).toBeVisible();
+  await expect.poll(async () => Number((await page.locator('.mini-kpis strong').first().innerText()).replace(/\D/g, ''))).toBeGreaterThan(400);
+  await page.getByRole('radio', { name: 'Пассажирские' }).click();
+  await page.getByRole('searchbox').fill('Астана');
+  await expect(page.locator('tbody tr').first()).toContainText('Астана');
+  await page.goto('/#/stations');
+  await expect.poll(async () => Number((await page.locator('.mini-kpis strong').first().innerText()).replace(/\D/g, ''))).toBeGreaterThan(500);
+  await page.getByRole('searchbox').fill('Караганда');
+  await expect(page.locator('tbody tr').first()).toContainText('Караганда');
+  await page.goto('/#/log');
+  await expect.poll(async () => page.locator('.timeline li').count()).toBeGreaterThan(50);
+  await page.getByRole('radio', { name: 'Вынужденные' }).click();
+  await expect(page.locator('.timeline li').first()).toContainText('остановлен');
+  await page.goto('/#/model');
+  await expect(page.getByRole('heading', { name: 'Решения модели', level: 1 })).toBeVisible();
+  await expect(page.locator('.model-card').first()).toContainText('Почему так');
+  await page.getByRole('radio', { name: 'Сократить' }).click();
+  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
+  await expect(page.getByRole('heading', { name: 'Выбор варианта пропуска на участке' })).toBeVisible();
 });

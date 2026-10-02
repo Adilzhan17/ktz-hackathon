@@ -45,6 +45,7 @@ test('map keeps stations and moving trains when external tiles fail, on a phone'
   await page.locator('.mobile-more summary').click();
   await expect(page.locator('.more-links').getByRole('link', { name: 'Карта', exact: true })).toBeVisible();
   await page.goto('/#/stations');
+  await page.getByRole('tab', { name: /Участок Караганда/ }).click();
   await page.goto('/#/map');
   await expect(page.locator('.geo-station-icon')).toHaveCount(10);
   await expect(page.locator('.leaflet-container')).toHaveCount(1);
