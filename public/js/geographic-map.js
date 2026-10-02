@@ -230,6 +230,6 @@ export function GeographicMap({ data }) {
 }
 
 export function MapPage({ data }) {
-  return html`<div class="geo-page-head"><${PageHeader} title="Карта участка" subtitle="Караганда — Мойынты" actions=${html`<a class="geo-scheme-link" href=${href('/')}><${Icon} name="chart-gantt" size=${16} />Схема и ГИД</a>`} /></div>
+  return html`<div class="geo-page-head"><${PageHeader} title="Карта участка" subtitle="Караганда — Мойынты" actions=${html`<a class="geo-scheme-link" href=${href('/overview')}><${Icon} name="chart-gantt" size=${16} />Схема и ГИД</a>`} /></div>
     <${GeographicMap} data=${data} /><details id="geo-dispatcher" class="geo-command-details"><summary><${Icon} name="list-checks" size=${18} /><span><strong>Панель диспетчера</strong><small>Задачи, варианты пропуска и команды выбранному объекту</small></span><${Icon} name="chevron-down" size=${18} /></summary><${DispatcherPanel} data=${data} /></details>`;
 }

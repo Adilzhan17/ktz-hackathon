@@ -44,3 +44,24 @@
 .station-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 .station-list li > span { display: grid; }
 @media (max-width: 760px) { .fleet-bars li { grid-template-columns: 1fr auto; } .fleet-bars .fb-bar { grid-column: 1 / -1; order: 3; } }
+
+/* ===== Сеть КТЖ на главной ===== */
+.net-kpis { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.net-panel { padding-bottom: 16px; }
+.net-toolbar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.net-time { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; }
+.net-count { color: var(--text-2); font-size: var(--text-sm); }
+.net-clock { display: grid; text-align: right; }
+.net-clock strong { font-size: var(--text-lg); }
+.net-clock small { color: var(--text-3); }
+.net-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: stretch; }
+.net-map-wrap { position: relative; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; min-height: max(600px, 72vh); }
+.net-map { position: absolute; inset: 0; background: #eef3f6; }
+.net-aside { display: grid; gap: 14px; align-content: start; max-height: max(600px, 72vh); overflow: auto; padding-right: 2px; }
+.net-train { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--accent-line); border-radius: var(--radius); background: var(--accent-bg); }
+.net-hint { display: flex; gap: 10px; align-items: flex-start; color: var(--text-2); padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); font-size: var(--text-sm); }
+.net-list ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 2px; }
+.net-list button { width: 100%; display: grid; grid-template-columns: 52px 1fr auto; gap: 8px; align-items: center; padding: 7px 8px; border: 0; border-radius: var(--radius-s); background: none; text-align: left; font-size: var(--text-sm); }
+.net-list button:hover { background: var(--surface-2); }
+.net-list h3 { display: flex; gap: 8px; align-items: center; }
+@media (max-width: 1100px) { .net-layout { grid-template-columns: minmax(0, 1fr); } .net-map-wrap { min-height: 460px; } .net-aside { max-height: none; } .net-time { margin-left: 0; } }

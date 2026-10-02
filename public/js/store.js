@@ -21,8 +21,8 @@ export function useLiveNow(fps = 1) {
 
 export const app = {
   data: null, online: false, failed: false, busy: false,
-  route: { page: 'overview', params: {} },
-  ui: { category: 'all', selectedTrain: null, selectedStation: null, mapFocus: null, zoom: 8, shift: 0, follow: true },
+  route: { page: 'network', params: {} },
+  ui: { category: 'all', selectedTrain: null, selectedStation: null, selectedNetTrain: null, mapFocus: null, zoom: 8, shift: 0, follow: true },
   toasts: [],
 };
 
@@ -60,10 +60,10 @@ export function parseHash(hash = location.hash) {
   const [path, query = ''] = hash.replace(/^#/, '').split('?');
   const parts = path.split('/').filter(Boolean);
   const params = Object.fromEntries(new URLSearchParams(query));
-  if (!parts.length) return { page: 'overview', params };
+  if (!parts.length) return { page: 'network', params };
   if (parts[0] === 'station') return { page: 'station', params: { ...params, id: parts[1], tab: parts[2] || 'tracks' } };
-  if (['trains', 'stations', 'log', 'decisions', 'how', 'map', 'fleet'].includes(parts[0])) return { page: parts[0], params };
-  return { page: 'overview', params };
+  if (['trains', 'stations', 'log', 'decisions', 'how', 'map', 'fleet', 'overview'].includes(parts[0])) return { page: parts[0], params };
+  return { page: 'network', params };
 }
 export const href = (path = '/') => `#${path}`;
 export function go(path) { location.hash = path; }

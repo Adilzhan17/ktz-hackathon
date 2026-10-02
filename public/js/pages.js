@@ -69,7 +69,7 @@ export function DecisionsPage({ data }) {
       <div class="stack">
         ${incident ? html`<${IncidentPanel} data=${data} />` : html`<section class="panel"><${Empty} icon="circle-check" title="Конфликтов нет">Движение идёт по графику. Введите событие справа, и система рассчитает варианты пропуска.</${Empty}></section>`}
         <section class="panel" aria-labelledby="prev-title">
-          <div class="panel-head"><div><h2 id="prev-title">Прогноз для выбранного варианта</h2><small>Окно 4 часа вокруг закрытого перегона. Красный отрезок — ожидание на станции.</small></div><a href=${href('/')}>Открыть полный ГИД</a></div>
+          <div class="panel-head"><div><h2 id="prev-title">Прогноз для выбранного варианта</h2><small>Окно 4 часа вокруг закрытого перегона. Красный отрезок — ожидание на станции.</small></div><a href=${href('/overview')}>Открыть полный ГИД</a></div>
           <${Gantt} data=${data} zoom=${4} start=${start} compact />
         </section>
       </div>
@@ -102,7 +102,7 @@ export function Trains({ data }) {
   const th = (key, label) => html`<th scope="col" aria-sort=${sort.key === key ? (sort.dir > 0 ? 'ascending' : 'descending') : 'none'}>
     <button type="button" class="th-btn" onClick=${() => setSort(s => ({ key, dir: s.key === key ? -s.dir : (key === 'delay' || key === 'load' ? -1 : 1) }))}>${label}
       <${Icon} name=${sort.key === key ? (sort.dir > 0 ? 'chevron-up' : 'chevron-down') : 'arrow-up-down'} size=${13} /></button></th>`;
-  const show = t => { updateUi({ selectedTrain: t.number }); go('/'); };
+  const show = t => { updateUi({ selectedTrain: t.number }); go('/overview'); };
   const exportCsv = () => downloadCsv('trains.csv', [
     ['Номер', 'Тип', 'Приоритет', 'Направление', 'Откуда', 'Куда', 'Вагонов', 'Локомотив', 'Загрузка, %', 'Масса, т', 'Состояние ТО', 'Тех. состояние, %', 'Прибытие по графику', 'Прогноз прибытия', 'Опоздание, мин'],
     ...rows.map(t => [t.number, t.label, t.priority, DIRECTION[t.direction], stationName(data, t.route[0][1]), stationName(data, t.route.at(-1)[1]), t.wagons, `${t.loco.series} №${t.loco.number}`, t.loadPct, t.grossT, t.techState.status, t.techState.conditionPct, clockAt(data, t.route.at(-1)[0]), clockAt(data, t.forecast.at(-1)[0]), t.delay ?? 'снят с рейса'])]);

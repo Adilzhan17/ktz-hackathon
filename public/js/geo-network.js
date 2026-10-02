@@ -136,7 +136,7 @@ export function NetworkBar({ scene }) {
   // контроллер появляется после создания карты
   useEffect(() => {
     let tries = 0;
-    const id = setInterval(() => { tries++; if (ctrl()?.ready) { setReady(true); clearInterval(id); } else if (tries > 100) clearInterval(id); }, 150);
+    const id = setInterval(() => { tries++; if (ctrl()?.ready) { const c = ctrl(); setOn({ stations: c.has('stations'), halts: c.has('halts'), depots: c.has('depots') }); setReady(true); clearInterval(id); } else if (tries > 100) clearInterval(id); }, 150);
     return () => clearInterval(id);
   }, []);
   // переход с других страниц: «показать на карте»

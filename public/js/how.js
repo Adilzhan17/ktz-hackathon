@@ -88,7 +88,7 @@ export function HowPage() {
               <li>Не учитывает локомотивные бригады и маневровые ресурсы</li><li>Не принимает решение за диспетчера</li><li>Использует учебные данные, а не реальную сеть</li></ul></div>
           </div>
           <div class="how-cta"><${Button} variant="primary" size="lg" iconRight="arrow-right" onClick=${() => go('/decisions')}>Перейти к работе с событиями</${Button}>
-            <${Button} size="lg" icon="chart-gantt" onClick=${() => go('/')}>Открыть обстановку</${Button}></div>
+            <${Button} size="lg" icon="chart-gantt" onClick=${() => go('/overview')}>Открыть обстановку</${Button}></div>
         </${Section}>
       </div>
     </div>`;
