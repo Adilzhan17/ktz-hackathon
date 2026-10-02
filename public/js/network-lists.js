@@ -2,7 +2,9 @@
 import { useMemo, useState } from 'preact/hooks';
 import { html, Icon, time, downloadCsv } from './lib.js';
 import { go, updateUi } from './store.js';
-import { Badge, Button, Kpi, Segmented, Empty } from './ui.js';
+import { Badge, Button, Kpi, Segmented, Empty, Dialog } from './ui.js';
+import { TrainDetails, StationDetails } from './network-details.js';
+import { ExportButton } from './network-export.js';
 import { useNetworkTrains, useStationIndex, routeOptions } from './network-data.js';
 import { networkStats } from './network-sim.js';
 
@@ -22,7 +24,9 @@ const SORTS = {
 };
 
 export function NetworkTrains({ scopeTabs }) {
-  const { sim, trains, loading, failed } = useNetworkTrains(5);
+  const { sim, trains, now, loading, failed } = useNetworkTrains(1);
+  const [selected, setSelected] = useState(null);
+  const selectedTrain = trains.find(t => t.uid === selected);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [status, setStatus] = useState('all');
@@ -48,6 +52,7 @@ export function NetworkTrains({ scopeTabs }) {
       <label class="search"><${Icon} name="search" size=${16} /><span class="sr-only">Поиск поезда сети</span>
         <input type="search" placeholder="Номер, город, станция, участок, локомотив" value=${query} onInput=${e => reset(setQuery)(e.target.value)} /></label>
       <${Button} icon="download" onClick=${exportCsv}>CSV</${Button}>
+      <${ExportButton} section="trains" />
     </div>
     <div class="filter-row">
       <${Segmented} label="Категория" value=${category} onChange=${reset(setCategory)} options=${[{ value: 'all', label: 'Все' }, { value: 'passenger', label: 'Пассажирские' }, { value: 'container', label: 'Контейнерные' }, { value: 'freight', label: 'Грузовые' }]} />
@@ -66,7 +71,7 @@ export function NetworkTrains({ scopeTabs }) {
       : html`<div class="table-wrap"><table class="table responsive">
         <thead><tr><th scope="col">№</th><th scope="col">Тип</th><th scope="col">Маршрут</th><th scope="col">Локомотив</th><th scope="col">Состав</th><th scope="col">Бригада</th><th scope="col">Тех. состояние</th><th scope="col">Положение</th><th scope="col">Состояние</th><th scope="col">Прибытие</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
         <tbody>${rows.slice(0, limit).map(t => html`<tr key=${t.uid}>
-          <td data-label="№"><strong>${t.number}</strong></td>
+          <td data-label="№"><${Button} size="sm" variant="ghost" onClick=${() => setSelected(t.uid)} label=${`Полная информация о поезде ${t.number}`}>№${t.number}</${Button}></td>
           <td data-label="Тип"><${Badge} tone=${TONE[t.category]}>${t.label}</${Badge}></td>
           <td data-label="Маршрут"><div class="two"><span>${t.from} <${Icon} name="arrow-right" size=${13} class="inline" /> ${t.to}</span><small>${t.route}</small></div></td>
           <td data-label="Локомотив"><div class="two"><span>${t.loco.series}</span><small>${t.loco.type}</small></div></td>
@@ -80,12 +85,19 @@ export function NetworkTrains({ scopeTabs }) {
           ${!rows.length && html`<tr><td colspan="11"><${Empty} icon="search" title="Ничего не найдено">Измените фильтры или поиск.</${Empty}></td></tr>`}</tbody></table></div>
         <div class="table-foot">Показано ${Math.min(limit, rows.length)} из ${fmt(rows.length)} (всего на сети ${fmt(trains.length)})
           ${rows.length > limit && html`<${Button} size="sm" onClick=${() => setLimit(limit + PAGE)}>Показать ещё ${Math.min(PAGE, rows.length - limit)}</${Button}>`}</div>`}
+    <${Dialog} id="network-train-details" open=${selected !== null} onClose=${() => setSelected(null)} title=${selectedTrain ? `Поезд №${selectedTrain.number} · полный паспорт` : 'Рейс завершён'}>
+      ${selectedTrain ? html`<${TrainDetails} sim=${sim} t=${selectedTrain} now=${now} onMap=${() => show(selectedTrain)} />` : html`<p>Поезд больше не находится в активном рейсе. Его события доступны в журнале.</p>`}
+    </${Dialog}>
   </section>`;
 }
 
 export function NetworkStations({ scopeTabs }) {
   const index = useStationIndex();
-  const { sim, trains } = useNetworkTrains(10);
+  const { sim, trains, now, failed } = useNetworkTrains(1);
+  const [selected, setSelected] = useState(null);
+  const [trainId, setTrainId] = useState(null);
+  const selectedStation = index?.find(r => r.id === selected);
+  const selectedTrain = trains.find(t => t.uid === trainId);
   const [query, setQuery] = useState('');
   const [kind, setKind] = useState('all');
   const [route, setRoute] = useState('all');
@@ -112,16 +124,17 @@ export function NetworkStations({ scopeTabs }) {
       <label class="search"><${Icon} name="search" size=${16} /><span class="sr-only">Поиск станции сети</span>
         <input type="search" placeholder="Город, станция или участок" value=${query} onInput=${e => reset(setQuery)(e.target.value)} /></label>
       <label class="check"><input type="checkbox" checked=${named} onChange=${e => reset(setNamed)(e.target.checked)} /> Только с названием (без «102 км»)</label>
+      <${ExportButton} section="stations" />
     </div>
     <div class="filter-row">
       <${Segmented} label="Вид" value=${kind} onChange=${reset(setKind)} options=${[{ value: 'all', label: 'Все' }, { value: 'station', label: 'Станции' }, { value: 'halt', label: 'Остановочные пункты' }]} />
       <${RouteSelect} sim=${sim} value=${route} onChange=${reset(setRoute)} />
     </div>
     <div class="mini-kpis"><span><strong>${fmt(stationsN)}</strong> станций</span><span><strong>${fmt(total - stationsN)}</strong> остановочных пунктов</span><span>в списке <strong>${fmt(rows.length)}</strong></span></div>
-    ${!index ? html`<p class="muted pad">Загрузка станций сети…</p>` : html`<div class="table-wrap"><table class="table responsive">
+    ${failed ? html`<p role="alert">Не удалось загрузить маршруты сети. Обновите страницу.</p>` : !index ? html`<p class="muted pad">Загрузка станций сети…</p>` : html`<div class="table-wrap"><table class="table responsive">
       <thead><tr><th scope="col">Название</th><th scope="col">Вид</th><th scope="col">Участок</th><th scope="col">Км на участке</th><th scope="col">Поездов на участке</th><th scope="col">Ближайший поезд</th><th scope="col"><span class="sr-only">Действия</span></th></tr></thead>
       <tbody>${rows.slice(0, limit).map(r => { const n = nearest(r); return html`<tr key=${r.id}>
-        <td data-label="Название"><strong>${r.name}</strong></td>
+        <td data-label="Название"><${Button} size="sm" variant="ghost" onClick=${() => setSelected(r.id)} label=${`Подробно о станции ${r.name}`}>${r.name}</${Button}></td>
         <td data-label="Вид">${r.kind === 'station' ? 'Станция' : 'Остановочный пункт'}</td>
         <td data-label="Участок">${r.route}${r.offKm > 15 ? html`<small class="muted"> · в ${r.offKm} км от линии</small>` : ''}</td>
         <td data-label="Км" class="num">${r.km}</td>
@@ -131,5 +144,9 @@ export function NetworkStations({ scopeTabs }) {
         ${!rows.length && html`<tr><td colspan="7"><${Empty} icon="search" title="Ничего не найдено">Измените фильтры или поиск.</${Empty}></td></tr>`}</tbody></table></div>
       <div class="table-foot">Показано ${Math.min(limit, rows.length)} из ${fmt(rows.length)}
         ${rows.length > limit && html`<${Button} size="sm" onClick=${() => setLimit(limit + PAGE)}>Показать ещё ${Math.min(PAGE, rows.length - limit)}</${Button}>`}</div>`}
+    <${Dialog} id="network-station-details" open=${selected !== null} onClose=${() => { if (trainId) setTrainId(null); else setSelected(null); }} title=${trainId ? selectedTrain ? `Поезд №${selectedTrain.number}` : 'Рейс завершён' : selectedStation?.name || 'Станция'}>
+      ${trainId ? html`<${Button} size="sm" icon="chevron-left" onClick=${() => setTrainId(null)}>К станции</${Button}>${selectedTrain ? html`<${TrainDetails} sim=${sim} t=${selectedTrain} now=${now} onMap=${() => { updateUi({ selectedNetTrain: selectedTrain.uid }); go('/'); }} />` : html`<p>Рейс завершён. События доступны в журнале.</p>`}`
+        : selectedStation && html`<${StationDetails} sim=${sim} station=${selectedStation} trains=${trains} now=${now} onMap=${() => show(selectedStation)} onTrain=${t => setTrainId(t.uid)} />`}
+    </${Dialog}>
   </section>`;
 }

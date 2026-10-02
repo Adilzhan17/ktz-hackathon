@@ -1,14 +1,16 @@
 // Статистика работы модели: решения, экономия, движение, бригады, ТО, участки.
-import { useMemo, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { html, Icon, count, downloadCsv, time } from './lib.js';
 import { Badge, Button, Kpi, PageHeader, Segmented, Empty } from './ui.js';
 import { useNetworkTrains } from './network-data.js';
 import { networkEvents, networkStats } from './network-sim.js';
-import { DECISION } from './log.js';
+import { DECISION, EventFeed } from './log.js';
+import { useNetworkArchive } from './network-archive.js';
+import { ExportButton } from './network-export.js';
 
 const fmt = n => Math.round(n).toLocaleString('ru-RU');
 const hm = min => `${Math.floor(min / 60)} ч ${String(Math.round(min % 60)).padStart(2, '0')} мин`;
-const WINDOWS = [{ value: 360, label: '6 часов' }, { value: 720, label: '12 часов' }, { value: 1440, label: 'Сутки' }];
+const WINDOWS = [{ value: 0, label: 'За всё время' }, { value: 360, label: '6 часов' }, { value: 720, label: '12 часов' }, { value: 1440, label: 'Сутки' }];
 const KIND_ORDER = ['send', 'accept', 'crew', 'yield', 'hold', 'repair', 'resolved'];
 const MEANING = {
   send: 'поезд выпущен на перегон, путь свободен', accept: 'поезд принят на станцию и поставлен на путь', crew: 'плановая смена бригады до выхода за предел работы',
@@ -44,16 +46,23 @@ function HourChart({ buckets }) {
 }
 
 export function StatsPage() {
-  const [windowMin, setWindowMin] = useState(1440);
+  const [windowMin, setWindowMin] = useState(0);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyKind, setHistoryKind] = useState('all');
+  useEffect(() => { if (showHistory) document.getElementById('statistics-history')?.scrollIntoView({ block: 'start' }); }, [showHistory, historyKind]);
+  const archive = useNetworkArchive();
   const [sortKey, setSortKey] = useState('decisions');
-  const { sim, trains, now, loading } = useNetworkTrains(10);
-  const slot = Math.floor(now / 10000);
+  const { sim, trains, now, loading } = useNetworkTrains(0.25);
+  const slot = now;
+  const period = windowMin || Math.max(1, (now - (archive.startedAt ?? now - 86400000)) / 60000);
   const calc = useMemo(() => {
     if (!sim || sim.error) return null;
     const t0 = performance.now();
-    const events = networkEvents(sim, now, windowMin);
+    const records = new Map(archive.events.map(e => [e.id, e]));
+    for (const e of networkEvents(sim, now, windowMin || 60)) records.set(e.id, e);
+    const events = [...records.values()].filter(e => e.at <= now && e.at >= now - period * 60000);
     return { events, ms: Math.round(performance.now() - t0) };
-  }, [sim, slot, windowMin]);
+  }, [sim, slot, windowMin, archive.events]);
   const stats = useMemo(() => networkStats(trains), [trains]);
 
   const m = useMemo(() => {
@@ -61,8 +70,9 @@ export function StatsPage() {
     const ev = calc.events;
     const byKind = Object.fromEntries(KIND_ORDER.map(k => [k, { n: 0, dwell: 0, dwellN: 0, savedMin: 0, savedW: 0 }]));
     const byRoute = new Map(), byCat = Object.fromEntries(CATS.map(c => [c.id, { decisions: 0, problems: 0, crew: 0, yield: 0, savedMin: 0, savedW: 0, dwell: 0, dwellN: 0 }]));
-    const hours = Math.max(1, Math.round(windowMin / 60)), hourStart = now - windowMin * 60000;
-    const buckets = Array.from({ length: hours }, (_, i) => ({ label: time(hourStart + i * 3600000).slice(0, 2) + ':00', work: 0, problem: 0 }));
+    const hours = Math.max(1, period / 60), hourStart = now - period * 60000;
+    const bucketCount = Math.min(24, Math.ceil(hours)), bucketWidth = period * 60000 / bucketCount;
+    const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: new Date(hourStart + i * bucketWidth).toLocaleString('ru-RU', { timeZone: 'Asia/Almaty', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }), work: 0, problem: 0 }));
     const hold = [], crewWorked = [];
     for (const e of ev) {
       const k = byKind[e.kind], r = byRoute.get(e.routeId) || { id: e.routeId, route: e.route, decisions: 0, problems: 0, crew: 0, savedMin: 0, savedW: 0, dwell: 0, dwellN: 0 };
@@ -73,7 +83,7 @@ export function StatsPage() {
       if (e.kind === 'crew') { r.crew++; byCat[e.category].crew++; if (e.workedMin) crewWorked.push(e.workedMin); }
       if (e.kind === 'yield') byCat[e.category].yield++;
       if (e.kind === 'resolved') { k.dwell += e.dwell; k.dwellN++; r.dwell += e.dwell; r.dwellN++; byCat[e.category].dwell += e.dwell; byCat[e.category].dwellN++; hold.push(e.dwell); }
-      const idx = Math.min(hours - 1, Math.max(0, Math.floor((e.at - hourStart) / 3600000)));
+      const idx = Math.min(bucketCount - 1, Math.max(0, Math.floor((e.at - hourStart) / bucketWidth)));
       buckets[idx][e.forced || e.kind === 'resolved' ? 'problem' : 'work']++;
     }
     const savedMin = ev.reduce((n, e) => n + (e.savedMin || 0), 0), savedW = ev.reduce((n, e) => n + (e.savedWeighted || 0), 0);
@@ -106,13 +116,15 @@ export function StatsPage() {
   const maxK = m ? Math.max(...KIND_ORDER.map(k => m.byKind[k].n), 1) : 1;
 
   return html`<${PageHeader} title="Статистика работы модели" subtitle="Сколько решений принято, что и где сэкономлено, как идёт движение, бригады, ТО и участки. Обновляется в реальном времени"
-      actions=${html`<${Button} icon="download" onClick=${exportCsv}>CSV по участкам</${Button}>`} />
+      actions=${html`<${Button} icon="download" onClick=${exportCsv}>CSV по участкам</${Button}><${ExportButton} />`} />
     <div class="filter-row"><${Segmented} label="Период статистики" value=${windowMin} onChange=${setWindowMin} options=${WINDOWS} />
-      <span class="muted">Расчёт за период занял ${calc?.ms ?? '…'} мс · ${fmt(trains.length)} поездов на линии · обновление каждые 10 секунд</span></div>
-    ${loading || !m ? html`<p class="muted pad">Расчёт статистики…</p>` : html`
+      <span class="muted">${fmt(trains.length)} поездов на линии · обновляется по ходу модели${archive.startedAt ? ` · архив с ${new Date(archive.startedAt).toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })}` : ''}</span></div>
+    ${archive.failed && html`<p role="status" class="bad">Нет связи с архивом. Итоги могут быть неполными до переподключения.</p>`}
+    <section class="panel" id="statistics-history"><div class="panel-head"><div><h2>Все записи доступны для проверки</h2><small>Откройте историю: поезд, станция, операция, причина, расчёт эффекта. Отправления и приёмы тоже входят в общий счётчик.</small></div><${Button} onClick=${() => { setHistoryKind('all'); setShowHistory(!showHistory); }} aria-expanded=${showHistory}>${showHistory ? 'Скрыть историю' : 'Посмотреть все решения'}</${Button}></div>${showHistory && html`<${EventFeed} key=${`${historyKind}:${windowMin}`} initialKind=${historyKind} initialWindow=${windowMin} />`}</section>
+    ${loading || archive.loading || !m ? html`<p class="muted pad">Расчёт статистики…</p>` : html`
     <section class="kpis" aria-label="Решения модели за период">
       <${Kpi} label="Решений за период" icon="list-checks" value=${fmt(m.total)} note=${`≈ ${fmt(m.total / m.hours)} в час`} />
-      <${Kpi} label="Сэкономлено поездам" icon="timer-reset" tone="accent" value=${fmt(m.savedMin)} unit=" мин" note=${`взвешенная экономия ${fmt(m.savedW)}`} />
+      <${Kpi} label="Расчётная экономия" icon="timer-reset" tone="accent" value=${fmt(m.savedMin)} unit=" мин" note=${`взвешенная экономия ${fmt(m.savedW)}`} />
       <${Kpi} label="Проблем решено" icon="badge-check" value=${`${m.problems ? Math.min(100, Math.round(m.resolved / m.problems * 100)) : 100}%`} note=${`${fmt(m.resolved)} решено из ${fmt(m.problems)} задержек и неисправностей`} />
       <${Kpi} label="Средний простой" icon="hourglass" value=${Math.round(avgHold)} unit=" мин" note=${m.hold.length ? `самый долгий ${Math.max(...m.hold)} мин` : 'простоев нет'} />
       <${Kpi} label="Смен бригад" icon="user-round" value=${fmt(m.byKind.crew.n)} note=${m.crewWorked.length ? `в среднем после ${hm(m.crewWorked.reduce((a, b) => a + b, 0) / m.crewWorked.length)} работы` : 'нет'} />
@@ -124,7 +136,7 @@ export function StatsPage() {
     <section class="panel"><div class="panel-head"><div><h2>Решения по типам</h2><small>Что именно решила модель и сколько это сэкономило.</small></div></div>
       <div class="table-wrap"><table class="table"><thead><tr><th scope="col">Решение</th><th scope="col" class="num">Количество</th><th scope="col">Доля</th><th scope="col">Что это</th><th scope="col" class="num">Сэкономлено, мин</th><th scope="col" class="num">Взвешенно</th><th scope="col" class="num">Ср. простой</th></tr></thead>
         <tbody>${KIND_ORDER.map(k => { const r = m.byKind[k]; return html`<tr key=${k}>
-          <td><${Badge} tone=${DECISION[k].tone} icon=${DECISION[k].icon}>${DECISION[k].label}</${Badge}></td><td class="num"><strong>${fmt(r.n)}</strong></td>
+          <td><${Badge} tone=${DECISION[k].tone} icon=${DECISION[k].icon}>${DECISION[k].label}</${Badge}></td><td class="num"><${Button} size="sm" variant="ghost" onClick=${() => { setHistoryKind(k); setShowHistory(true); }} label=${`Показать ${DECISION[k].label}: ${fmt(r.n)} записей`}>${fmt(r.n)}</${Button}></td>
           <td style="width:140px"><${Bar} value=${r.n} max=${maxK} tone=${['hold', 'repair'].includes(k) ? 'danger' : 'accent'} /> <small>${m.total ? Math.round(r.n / m.total * 100) : 0}%</small></td>
           <td class="muted">${MEANING[k]}</td><td class="num">${r.savedMin ? fmt(r.savedMin) : '—'}</td><td class="num">${r.savedW ? fmt(r.savedW) : '—'}</td><td class="num">${r.dwellN ? `${Math.round(r.dwell / r.dwellN)} мин` : '—'}</td></tr>`; })}</tbody></table></div></section>
     <section class="panel"><div class="panel-head"><div><h2>По типам поездов</h2></div></div>
@@ -148,7 +160,7 @@ export function StatsPage() {
         <${Histogram} title="Длительность простоев (решённые)" rows=${[['до 15 мин', 0, 15], ['15–30', 15, 30], ['30–60', 30, 60], ['более часа', 60, 1e9]].map(([label, a, b]) => ({ label, value: m.hold.filter(x => x >= a && x < b).length }))} note="за выбранный период" /></div></section>
     <section class="panel"><div class="panel-head"><div><h2>Как работала модель</h2></div></div>
       <ul class="plain-list">
-        <li>Модель обработала <strong>${fmt(trains.length)}</strong> поездов сети и сформировала <strong>${fmt(m.total)}</strong> записей за ${windowMin / 60} ч; расчёт ленты занял ${calc.ms} мс.</li>
+        <li>На линии <strong>${fmt(trains.length)}</strong> поездов; в выбранном периоде <strong>${fmt(m.total)}</strong> записей за ${Math.round(period / 60)} ч; расчёт ленты занял ${calc.ms} мс.</li>
         <li>Расписание строится по <strong>${fmt(sim.services.length)}</strong> регулярным службам на <strong>${sim.routes.length}</strong> маршрутах; положение каждого поезда определяется только временем, поэтому сеть не сбрасывается и продолжает работу после перезапуска.</li>
         <li>Решение о смене бригады принимается заранее: если бригада не успеет дойти до следующей станции в пределах 5,5–7 ч работы, смена назначается на текущей.</li>
         <li><strong>Как считается экономия.</strong> Пропуск приоритетного: избежанная задержка приоритетного поезда (12–25 мин) × вес его типа минус собственный простой × вес своего типа. Плановая смена бригады: 31 мин против вынужденной замены (в среднем 45 мин ожидания вместо 14 мин планово) × вес типа. Вес: пассажирский 10, контейнерный 2, грузовой 1. Это оценка модели, а не измерение на реальной сети.</li>

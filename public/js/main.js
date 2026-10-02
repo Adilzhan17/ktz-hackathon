@@ -10,6 +10,7 @@ import { StationPage } from './station.js';
 import { LogPage } from './log.js';
 import { ModelPage } from './model.js';
 import { StatsPage } from './stats.js';
+import { SchedulesPage } from './schedules.js';
 import { FleetPage } from './fleet.js';
 import { NetworkPage } from './network-map.js';
 import { useNetworkTotals } from './network-data.js';
@@ -21,12 +22,13 @@ const NAV = [
   { page: 'stations', path: '/stations', label: 'Станции', icon: 'building-2', also: ['station'] },
   { page: 'model', path: '/model', label: 'Решения модели', icon: 'lightbulb' },
   { page: 'stats', path: '/stats', label: 'Статистика', icon: 'trending-up' },
+  { page: 'schedules', path: '/schedules', label: 'Расписания', icon: 'calendar-clock' },
   { page: 'log', path: '/log', label: 'Журнал', icon: 'list-checks' },
   { page: 'fleet', path: '/fleet', label: 'Парк и депо', icon: 'truck' },
   { page: 'overview', path: '/overview', label: 'Диспетчерская панель', icon: 'chart-gantt', also: ['decisions', 'map'] },
   { page: 'how', path: '/how', label: 'Как это работает', icon: 'book-open' },
 ];
-const TITLES = { network: 'Карта сети', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', stats: 'Статистика', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
+const TITLES = { schedules: 'Расписания', network: 'Карта сети', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', stats: 'Статистика', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
 function Nav({ page, onAbout, attention, mini, onMini }) {
   const more = useRef(null);
@@ -94,6 +96,7 @@ function App() {
     decisions: html`<${DecisionsPage} data=${data} />`,
     model: html`<${ModelPage} data=${data} />`,
     stats: html`<${StatsPage} data=${data} />`,
+    schedules: html`<${SchedulesPage} />`,
     how: html`<${HowPage} />`,
     trains: html`<${Trains} data=${data} />`,
     stations: html`<${Stations} data=${data} />`,
@@ -108,7 +111,7 @@ function App() {
       <${Topbar} data=${data} onReset=${() => setDialog('reset')} onSearch=${() => setDialog('search')} />
       ${!app.online && html`<div class="offline" role="alert"><${Icon} name="wifi-off" size=${18} /> Нет соединения с сервером. Действия временно недоступны — подключаемся заново…</div>`}
       <main id="main" tabindex="-1">${page}</main>
-      <footer class="foot"><span>Помощник диспетчера. Решение принимает поездной диспетчер.</span><span>Учебная модель: данные условные, система не заменяет СЦБ и сертифицированные системы безопасности.</span></footer>
+      <footer class="foot"><span>Помощник диспетчера. Решение принимает поездной диспетчер.</span><span>Система не заменяет СЦБ и сертифицированные системы безопасности.</span></footer>
     </div>
     <${Toasts} />
     <${QuickSearch} data=${data} open=${dialog === 'search'} onClose=${() => setDialog(null)} />

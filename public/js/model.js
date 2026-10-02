@@ -7,6 +7,7 @@ import { useNetworkTrains } from './network-data.js';
 import { networkDecisions } from './network-sim.js';
 import { RouteSelect } from './network-lists.js';
 import { EventFeed } from './log.js';
+import { ExportButton } from './network-export.js';
 
 const VERDICT = {
   justified: { label: 'Задержка оправдана', tone: 'accent', icon: 'circle-check' },
@@ -23,7 +24,7 @@ function Options({ options, chosen }) {
 }
 
 function NetworkDecisions() {
-  const { sim, trains, loading } = useNetworkTrains(5);
+  const { sim, trains, loading } = useNetworkTrains(0.5);
   const [route, setRoute] = useState('all');
   const [verdict, setVerdict] = useState('all');
   const [category, setCategory] = useState('all');
@@ -73,12 +74,12 @@ function NetworkDecisions() {
 export function ModelPage() {
   const [scope, setScope] = useState('network');
   return html`<${PageHeader} title="Решения модели" subtitle="Что модель выбирает, по каким правилам и почему это выгоднее: по всей сети КТЖ"
-      actions=${html`<${Button} icon="book-open" onClick=${() => go('/how')}>Как это работает</${Button}>`} />
+      actions=${html`<${ExportButton} section="decisions" /><${ExportButton} section="model" /><${Button} icon="book-open" onClick=${() => go('/how')}>Как это работает</${Button}>`} />
     <${Tabs} label="Охват решений" value=${scope} idPrefix="md" onChange=${setScope}
       tabs=${[{ value: 'network', label: 'Вся сеть' }, { value: 'journal', label: 'Журнал решений' }]} />
     <div id="md-panel" role="tabpanel" aria-labelledby=${`md-${scope}`} class="tab-panel">
       ${scope === 'network' ? html`<${NetworkDecisions} />`
         : html`<section class="panel"><div class="panel-head"><div><h2>Журнал принятых решений</h2><small>Что модель решила прямо сейчас и недавно: принять, отправить, пропустить приоритетный поезд, сменить бригаду, задержать, устранить неисправность. Лента идёт в реальном времени.</small></div></div><${EventFeed} /></section>`}
-      <p class="note"><${Icon} name="info" size=${15} /> Для сети расчёт упрощённый: расписание синтетическое, положение поездов берётся из модели движения, а решения по очерёдности оценивает та же весовая схема, что и на участке. </p>
+      <p class="note"><${Icon} name="info" size=${15} /> Приоритеты: пассажирский ×10, контейнерный ×2, грузовой ×1. История операций и расчёт эффекта доступны во вкладке «Журнал решений» и в полном экспорте. </p>
     </div>`;
 }

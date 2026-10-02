@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useLiveNow } from './store.js';
 import { useNetwork } from './geo-network.js';
 import { prepare, networkTrains, networkStats } from './network-sim.js';
+import { buildStationIndex } from './network-detail-data.js';
 
 let simLoading;
 export function useSim() {
@@ -38,17 +39,7 @@ export function useStationIndex() {
   return useMemo(() => {
     if (!sim || sim.error || !net || net.error) return null;
     if (indexCache?.sim === sim) return indexCache.rows;
-    const pts = [];
-    for (const r of sim.routes) for (const p of r.points) pts.push([p[0], p[1], p[2], r]);
-    const rows = [];
-    const add = (rec, kind) => {
-      const [, , lat, lon] = rec, k = Math.cos(lat * Math.PI / 180);
-      let best = null, bd = Infinity;
-      for (const p of pts) { const dy = p[0] - lat, dx = (p[1] - lon) * k, d = dy * dy + dx * dx; if (d < bd) { bd = d; best = p; } }
-      rows.push({ kind, rec, id: rec[0], name: rec[1], lat, lon, routeId: best[3].id, route: best[3].name, km: Math.round(best[2]), offKm: Math.round(Math.sqrt(bd) * 111) });
-    };
-    net.net.stations.forEach(r => add(r, 'station'));
-    net.net.halts.forEach(r => add(r, 'halt'));
+    const rows = buildStationIndex(sim, net.net);
     indexCache = { sim, rows };
     return rows;
   }, [sim, net]);

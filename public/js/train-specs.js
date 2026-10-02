@@ -28,6 +28,8 @@ export function TrainSpecs({ t }) {
     <section aria-label="Состав"><h4>Состав</h4><div class="facts">
       <${Fact} icon="package" label=${t.category === 'passenger' ? 'Вагонов' : 'Вагонов и груз'} value=${`${t.wagons} ваг.${t.cargo ? ` · ${t.cargo}, ${t.loaded ? 'гружёный' : 'порожний'}` : ''}`} />
       <${Fact} icon="weight" label="Масса брутто / нетто" value=${`${c.grossT.toLocaleString('ru-RU')} т / ${c.netT.toLocaleString('ru-RU')} т`} />
+      <${Fact} icon="weight" label="Тара вагонов" value=${`${c.tareT.toLocaleString('ru-RU')} т`} />
+      <${Fact} icon="weight" label="Осевая нагрузка" value=${`${c.axleLoadT} т/ось`} />
       <${Fact} icon="ruler" label="Длина поезда" value=${`${c.lengthM} м`} />
       <${Fact} icon="gauge" label=${t.category === 'passenger' ? 'Заполнение' : 'Загрузка'} value=${t.category === 'passenger' ? `${c.loadPct}% · ≈ ${Math.round(t.wagons * 52 * c.loadPct / 100)} пасс.` : t.loaded ? `${c.loadPct}%` : 'порожний'} />
       <${Fact} icon="shield-check" label="Тормоза" value=${`${c.braking}, опробованы за ${-c.brakeCheckMin} мин до отправления`} /></div></section>

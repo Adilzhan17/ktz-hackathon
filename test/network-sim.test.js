@@ -46,7 +46,7 @@ test('stopped trains explain themselves; forced stops carry a reason and a wait 
   const forced = trains.filter(t => t.stopped && !t.planned);
   assert.ok(forced.length > 3);
   for (const t of forced) assert.ok(t.reason && t.delayMin >= 0 && t.restMin >= 0, t.number);
-  assert.ok(trains.filter(t => t.stopped && t.planned).every(t => t.reason === 'плановая стоянка'));
+  assert.ok(trains.filter(t => t.stopped && t.planned).every(t => ['плановая стоянка', 'смена локомотивной бригады'].includes(t.reason)));
   const e = trains.find(t => t.loco.type === 'электровоз');
   assert.ok(sim.byId.get(e.routeId).electrified > 0.5, 'электровозы — на электрифицированных маршрутах');
 });

@@ -60,7 +60,7 @@ export function Dialog({ id = 'dialog', open, onClose, title, children, actions 
     if (open && !d.open) d.showModal();
     if (!open && d.open) d.close();
   }, [open]);
-  return html`<dialog ref=${ref} class="dialog" aria-labelledby=${`${id}-title`} onCancel=${e => { e.preventDefault(); onClose(); }} onKeyDown=${e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }} onClick=${e => { if (e.target === ref.current) onClose(); }}>
+  return html`<dialog id=${id} ref=${ref} class="dialog" aria-labelledby=${`${id}-title`} onCancel=${e => { e.preventDefault(); onClose(); }} onKeyDown=${e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); } }} onClick=${e => { if (e.target === ref.current) onClose(); }}>
     <div class="dialog-body">
       <div class="dialog-head"><h2 id=${`${id}-title`}>${title}</h2><${Button} variant="ghost" size="sm" icon="x" label="Закрыть" onClick=${onClose} /></div>
       <div class="dialog-content">${children}</div>

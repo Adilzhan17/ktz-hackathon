@@ -5,6 +5,10 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { createState, snapshot, act, tick, advanceTime } from './model.js';
+import { prepare, networkTrains, networkDecisions, networkStats, networkItinerary } from '../public/js/network-sim.js';
+import { NetworkArchive } from './network-archive.js';
+import { buildStationIndex, stationBoard } from '../public/js/network-detail-data.js';
+import { buildSchedule, scheduleEconomics } from '../public/js/schedule-engine.js';
 
 // KTZ_AUTOPLAY=0 — детерминированный режим для тестов: время стоит, события выключены, состояние не сохраняется.
 // Иначе модель живёт в реальном времени: расписание строится непрерывно, события случаются сами, состояние хранится на диске.
@@ -44,6 +48,28 @@ function save() {
   } catch (error) { console.error('Не удалось сохранить состояние:', error.message); }
 }
 let state = load();
+const routeData = JSON.parse(readFileSync(new URL('../public/data/kz-routes.json', import.meta.url), 'utf8'));
+const stationData = JSON.parse(readFileSync(new URL('../public/data/kz-stations.json', import.meta.url), 'utf8'));
+const network = prepare(routeData);
+let stationIndex;
+const SCHEDULE_FILE = path.join(path.dirname(STATE_FILE), 'network-schedule.json');
+let savedSchedule = { plan: null };
+if (autoplay && existsSync(SCHEDULE_FILE)) {
+  try { savedSchedule = JSON.parse(readFileSync(SCHEDULE_FILE, 'utf8')); }
+  catch (error) { console.error('Не удалось прочитать расписание:', error); savedSchedule = { plan: null, error: 'Сохранённый план не удалось прочитать. Исходный файл сохранён.' }; }
+}
+let archive;
+try { archive = new NetworkArchive({ sim: network, now: state.now, file: autoplay ? path.join(path.dirname(STATE_FILE), 'network-events.jsonl') : null }); }
+catch (error) { console.error('Архив сети недоступен (движение продолжено, файл сохранён):', error); }
+const networkClients = new Set();
+function archiveTick() {
+  if (!archive) return;
+  const events = archive.advance(state.now);
+  if (events.length) {
+    const message = `event: batch\ndata: ${JSON.stringify({ events, through: state.now })}\n\n`;
+    for (const res of networkClients) if (!res.write(message)) res.end();
+  }
+}
 const clients = new Set();
 const publicRoot = new URL('../public/', import.meta.url);
 const port = Number(process.env.PORT || 3000);
@@ -68,6 +94,7 @@ const timer = setInterval(() => {
   if (state.speed > 1 && !clients.size) { state.speed = 1; state.synced = false; }
   let changed = false;
   try { changed = tick(state, 1, Date.now()); } catch (error) { console.error('Ошибка шага модели:', error); }
+  try { archiveTick(); } catch (error) { console.error('Ошибка архива сети:', error); }
   if (clients.size) {
     if (changed || ticks % 5 === 0) broadcast();
     else for (const res of clients) res.write(clock());
@@ -77,6 +104,46 @@ const timer = setInterval(() => {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
+    if (req.method === 'GET' && url.pathname === '/api/schedule') return json(res, 200, savedSchedule);
+    if (req.method === 'POST' && url.pathname === '/api/schedule') {
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 8192) return json(res, 413, { error: 'Слишком большой запрос' }); }
+      const input = JSON.parse(body);
+      if (!Number.isFinite(input.createdAt) || input.createdAt > state.now + 2000 || input.createdAt < state.now - 7 * 86400000) return json(res, 400, { error: 'Пересчитайте план на актуальное время' });
+      if (input.routeId !== 'all' && !network.byId.has(input.routeId)) return json(res, 400, { error: 'Неизвестный маршрут' });
+      const plan = buildSchedule(network, input.createdAt, input.config, input.routeId);
+      const economics = scheduleEconomics(plan, input.rates);
+      const next = { savedAt: Date.now(), plan, rates: economics.rates, economics };
+      if (autoplay) { mkdirSync(path.dirname(SCHEDULE_FILE), { recursive: true }); writeFileSync(`${SCHEDULE_FILE}.tmp`, JSON.stringify(next)); renameSync(`${SCHEDULE_FILE}.tmp`, SCHEDULE_FILE); }
+      savedSchedule = next;
+      return json(res, 200, savedSchedule);
+    }
+    if (req.method === 'GET' && url.pathname === '/api/network-events') {
+      if (!archive) return json(res, 503, { error: 'Архив сети недоступен' });
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      res.write(`event: archive\ndata: ${JSON.stringify(archive.snapshot(Infinity))}\n\n`);
+      networkClients.add(res); req.on('close', () => networkClients.delete(res)); return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/network-export') {
+      if (!archive) return json(res, 503, { error: 'Архив сети недоступен' });
+      const section = url.searchParams.get('section') || 'all';
+      if (!['all', 'trains', 'stations', 'model', 'decisions', 'journal'].includes(section)) return json(res, 400, { error: 'Неизвестный раздел' });
+      const now = state.now, trains = networkTrains(network, now);
+      const data = { schemaVersion: 1, exportedAt: new Date().toISOString(), modelTime: now, archiveStartedAt: archive.startedAt,
+        scope: { trains: 'active trips at modelTime', stations: 'all indexed stations with current operations', journal: 'all archived events through modelTime', decisions: 'current analysis and archived operations' } };
+      const has = key => section === 'all' || section === key;
+      if (has('trains')) data.trains = trains.map(t => ({ ...t, itinerary: networkItinerary(network, t) }));
+      if (has('stations')) {
+        stationIndex ||= buildStationIndex(network, stationData);
+        data.stations = { source: stationData, operational: stationIndex.map(r => ({ ...r, ...stationBoard(network, r, trains, now) })) };
+      }
+      if (has('model')) data.model = { routes: routeData, services: network.services, statistics: networkStats(trains), dispatcher: snapshot(state), schedule: savedSchedule };
+      if (has('decisions')) data.decisions = { current: networkDecisions(trains), history: archive.snapshot(now).events };
+      if (has('journal')) data.journal = archive.snapshot(now);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="ktz-${section}.json"` });
+      return res.end(JSON.stringify(data));
+    }
     if (req.method === 'GET' && url.pathname === '/api/state') return json(res, 200, snapshot(state));
     if (req.method === 'GET' && url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -93,7 +160,7 @@ const server = http.createServer(async (req, res) => {
       const action = JSON.parse(body);
       if (action?.type === 'reset') { state = fresh(); save(); }
       else act(state, action);
-      broadcast(); return json(res, 200, snapshot(state));
+      archiveTick(); broadcast(); return json(res, 200, snapshot(state));
     }
     if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'Метод API не найден' });
     if (req.method !== 'GET') return json(res, 405, { error: 'Метод не поддерживается' });
@@ -123,7 +190,7 @@ const server = http.createServer(async (req, res) => {
     json(res, 400, { error: error instanceof SyntaxError ? 'Некорректный JSON' : error.message });
   }
 });
-const heartbeat = setInterval(() => { for (const res of clients) res.write(': heartbeat\n\n'); }, 1000);
+const heartbeat = setInterval(() => { for (const res of [...clients, ...networkClients]) res.write(': heartbeat\n\n'); }, 1000);
 server.listen(port, host, () => console.log(`Автодиспетчер: http://${host}:${port}`));
 server.on('error', error => { console.error(error.message); clearInterval(heartbeat); clearInterval(timer); process.exit(1); });
-process.on('SIGTERM', () => { save(); clearInterval(heartbeat); clearInterval(timer); for (const client of clients) client.end(); server.close(); });
+process.on('SIGTERM', () => { save(); clearInterval(heartbeat); clearInterval(timer); for (const client of [...clients, ...networkClients]) client.end(); server.close(); });

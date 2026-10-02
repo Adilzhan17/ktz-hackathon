@@ -205,6 +205,42 @@ export function networkTrains(sim, nowMs, { exclude } = {}) {
   return out;
 }
 
+/** Полный прогноз остановок активного рейса — тот же профиль, что двигает поезд. */
+export function networkItinerary(sim, train) {
+  const sep = train.uid.lastIndexOf('@');
+  const service = sim.services.find(s => s.id === train.uid.slice(0, sep));
+  if (!service) return [];
+  const profile = profileOf(service, train.uid);
+  return [
+    { name: train.from, km: 0, arrival: train.departedMs, departure: train.departedMs, reason: 'отправление', planned: true },
+    ...profile.legs.map(leg => ({ name: leg.name, km: leg.km, track: leg.track,
+      arrival: Math.round(train.departedMs + leg.t * 60000), departure: Math.round(train.departedMs + (leg.t + leg.dwell) * 60000),
+      reason: leg.reason, planned: leg.planned, crew: Boolean(leg.crew) })),
+    { name: train.to, km: train.totalKm, arrival: train.arrivesMs, departure: null, reason: 'прибытие на конечную', planned: true },
+  ];
+}
+
+/** Заявки на будущие рейсы из непрерывного расписания. */
+export function scheduledTrips(sim, fromMs, toMs) {
+  const out = [];
+  for (const s of sim.services) {
+    const from = fromMs / 60000 + TZ, to = toMs / 60000 + TZ;
+    for (let m = Math.ceil((from - s.phase) / s.period); s.phase + m * s.period < to; m++) {
+      const dep = s.phase + m * s.period, uid = `${s.id}@${m}`, profile = profileOf(s, uid), h = hash(uid);
+      const wagons = s.cat === 'passenger' ? 8 + h % 9 : 45 + h % 25;
+      const loaded = s.cat !== 'passenger' && h % 100 < (s.dir === 'fwd' ? 74 : 36);
+      const ch = characteristics(s, uid, profile, 0, { stopped: true }, h, locoOf(s.cat, s.route, h), wagons, loaded);
+      out.push({ uid, number: s.base + 2 * (((m % s.copies) + s.copies) % s.copies), category: s.cat, label: CATEGORIES[s.cat].label,
+        routeId: s.route.id, route: s.route.name, dir: s.dir,
+        from: s.dir === 'fwd' ? s.route.from : s.route.to, to: s.dir === 'fwd' ? s.route.to : s.route.from,
+        departedMs: Math.round((dep - TZ) * 60000), arrivesMs: Math.round((dep - TZ + profile.total) * 60000),
+        totalKm: s.route.km, electrified: s.route.electrified, wagons, loaded, consist: ch.consist, loco: ch.loco, crew: ch.crew,
+        cargo: s.cat === 'container' ? 'контейнеры' : s.cat === 'freight' ? CARGO[h % CARGO.length] : null });
+    }
+  }
+  return out.sort((a, b) => a.departedMs - b.departedMs || a.uid.localeCompare(b.uid));
+}
+
 /** Сводка по сети. */
 export function networkStats(trains) {
   const by = c => trains.filter(t => t.category === c).length;
@@ -223,12 +259,26 @@ export function networkStats(trains) {
 
 const WEIGHT = { passenger: 10, container: 2, freight: 1 }; // как в модели участка: пассажирские ×10, транзит и контейнерные ×2, прочие ×1
 const absKm = t => (t.dir === 'fwd' ? t.km : t.totalKm - t.km);
-const eventMemo = { key: '', list: [] };
+const eventMemo = new WeakMap();
+
+// Build a minute ahead; reveal each event at its exact model timestamp.
+// Repeated UI frames only filter the cached schedule, never rebuild the network.
+export function networkEvents(sim, nowMs, windowMin = 360) {
+  const slot = Math.floor(nowMs / 60000);
+  let windows = eventMemo.get(sim);
+  if (!windows) { windows = new Map(); eventMemo.set(sim, windows); }
+  let cached = windows.get(windowMin);
+  if (!cached || cached.slot !== slot) {
+    cached = { slot, list: buildNetworkEvents(sim, (slot + 1) * 60000, windowMin + 1) };
+    if (windows.size >= 8) windows.delete(windows.keys().next().value);
+    windows.set(windowMin, cached);
+  }
+  const from = nowMs - windowMin * 60000;
+  return cached.list.filter(e => e.at >= from && e.at <= nowMs);
+}
 
 /** События сети за последние windowMin минут: отправления, прибытия, стоянки (по расписанию и вынужденные). */
-export function networkEvents(sim, nowMs, windowMin = 360) {
-  const key = `${sim.services.length}|${Math.floor(nowMs / 5000)}|${windowMin}`;
-  if (eventMemo.key === key) return eventMemo.list;
+function buildNetworkEvents(sim, nowMs, windowMin = 360) {
   const now = nowMs / 60000 + TZ, from = now - windowMin;
   const list = [];
   for (const s of sim.services) {
@@ -245,7 +295,17 @@ export function networkEvents(sim, nowMs, windowMin = 360) {
       const push = (e, kind, station, text, forced = false, extra = null) => {
         const t = dep + e;
         if (t < from || t > now) return;
-        list.push({ ...base, at: Math.round((t - TZ) * 60000), kind, station, text, forced, ...extra });
+        const at = Math.round((t - TZ) * 60000);
+        const explanation = {
+          send: 'Отправление по рассчитанному графику после завершения предусмотренных операций.',
+          accept: 'Приём предусмотрен маршрутом рейса; место и время определены графиком остановок.',
+          crew: 'Замена бригады для соблюдения рабочего интервала и продолжения рейса без вынужденного ожидания.',
+          yield: 'Пропуск поезда с большим весом приоритета: пассажирский ×10, контейнерный ×2, грузовой ×1.',
+          hold: 'Стоянка до завершения операции или освобождения маршрута по профилю рейса.',
+          repair: 'Движение остановлено на время устранения неисправности.',
+          resolved: 'Завершён предусмотренный интервал ожидания; движение возобновлено.',
+        }[kind];
+        list.push({ ...base, id: `${uid}:${kind}:${at}:${station}`, at, kind, station, text, forced, explanation, ...extra });
       };
       const kindOf = reason => (/пропуск/.test(reason) ? 'yield' : /бригад/.test(reason) ? 'crew' : /неисправн/.test(reason) ? 'repair' : 'hold');
       push(0, 'send', origin, `Отправлен №${number} (${base.label.toLowerCase()}) со станции ${origin} в сторону ${dest}: путь свободен, маршрут задан`);
@@ -255,7 +315,7 @@ export function networkEvents(sim, nowMs, windowMin = 360) {
           push(leg.t, 'accept', st.name, `Принят №${number} на станцию ${st.name}, ${track}: плановая стоянка ${leg.dwell} мин`, false, { dwell: leg.dwell });
           if (leg.crew) {
             const h = Math.floor(leg.workedMin / 60), m = leg.workedMin % 60;
-            push(leg.t + 4, 'crew', st.name, `Смена локомотивной бригады №${number} на ${st.name}: прежняя отработала ${h} ч ${m} мин, уходит на отдых (12 ч), новая приняла поезд`, false, { workedMin: leg.workedMin, savedMin: 31, savedWeighted: 31 * WEIGHT[s.cat] });
+            push(leg.t + 4, 'crew', st.name, `Смена локомотивной бригады №${number} на ${st.name}: прежняя отработала ${h} ч ${m} мин, уходит на отдых (12 ч), новая приняла поезд`, false, { workedMin: leg.workedMin, savedMin: 31, savedWeighted: 31 * WEIGHT[s.cat], calculation: `45 мин вынужденной замены − 14 мин плановой = 31 мин; 31 × ${WEIGHT[s.cat]} = ${31 * WEIGHT[s.cat]} взвешенных мин` });
           }
           push(leg.t + leg.dwell, 'send', st.name, `Отправлен №${number} со станции ${st.name}${leg.crew ? ' после смены бригады' : ''}: путь свободен`);
         } else {
@@ -268,7 +328,7 @@ export function networkEvents(sim, nowMs, windowMin = 360) {
           }[kind];
           const benW = s.cat === 'freight' ? (hh % 100 < 60 ? 10 : 2) : s.cat === 'container' ? 10 : 10;
           const avoided = 12 + (hh >>> 4) % 14;
-          const saving = kind === 'yield' ? { savedMin: avoided, savedWeighted: Math.max(0, avoided * benW - leg.dwell * WEIGHT[s.cat]) } : null;
+          const saving = kind === 'yield' ? { savedMin: avoided, savedWeighted: Math.max(0, avoided * benW - leg.dwell * WEIGHT[s.cat]), calculation: `Приоритетному: ${avoided} мин × ${benW}; собственный простой: ${leg.dwell} мин × ${WEIGHT[s.cat]}. Чистый эффект: ${avoided * benW - leg.dwell * WEIGHT[s.cat]} взвешенных мин. В положительную экономию входит max(0, эффект).` } : null;
           push(leg.t, kind, st.name, text, true, { dwell: leg.dwell, ...saving });
           const done = { yield: `приоритетный поезд пропущен`, crew: `бригада заменена`, repair: `неисправность устранена`, hold: `${leg.reason}: вопрос решён` }[kind];
           push(leg.t + leg.dwell, 'resolved', st.name, `Проблема решена на ${st.name}: ${done}. №${number} отправлен после ${leg.dwell} мин простоя`, false, { dwell: leg.dwell, cause: kind });
@@ -278,7 +338,6 @@ export function networkEvents(sim, nowMs, windowMin = 360) {
     }
   }
   list.sort((a, b) => b.at - a.at);
-  eventMemo.key = key; eventMemo.list = list;
   return list;
 }
 
