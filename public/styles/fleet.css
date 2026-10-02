@@ -65,3 +65,13 @@
 .net-list button:hover { background: var(--surface-2); }
 .net-list h3 { display: flex; gap: 8px; align-items: center; }
 @media (max-width: 1100px) { .net-layout { grid-template-columns: minmax(0, 1fr); } .net-map-wrap { min-height: 460px; } .net-aside { max-height: none; } .net-time { margin-left: 0; } }
+
+.net-train-canvas { position: absolute; inset: 0; z-index: 620; pointer-events: none; }
+.net-tip { position: absolute; z-index: 700; pointer-events: none; display: grid; gap: 2px; width: 252px; padding: 10px 12px; background: var(--nav-bg); color: #e7f0f5; border-radius: var(--radius); box-shadow: var(--shadow-2); font-size: var(--text-sm); }
+.net-tip strong { color: #fff; }
+.net-tip small { color: #9db8c7; }
+.net-tip .bad { color: #ffb4ab !important; }
+
+.net-chip-top { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--text); text-decoration: none; font-size: var(--text-sm); white-space: nowrap; }
+.net-chip-top:hover { border-color: var(--accent); }
+@media (max-width: 900px) { .net-chip-top { display: none; } }

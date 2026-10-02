@@ -23,7 +23,7 @@ export function Overview({ data }) {
   const broken = data.trains.filter(t => t.broken).length;
   return html`<${PageHeader} title="Оперативная обстановка"
       subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
-      actions=${html`<a class="btn btn-secondary" href=${href('/map')}><${Icon} name="map-pin" size=${17} />Карта участка</a><a class="btn btn-secondary" href=${href('/trains')}><${Icon} name="train-front" size=${17} />${data.trains.length} поездов</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
+      actions=${html`<a class="btn btn-secondary" href=${href('/map')}><${Icon} name="map-pin" size=${17} />Карта участка</a><a class="btn btn-secondary" href=${href('/trains')}><${Icon} name="train-front" size=${17} />${data.trains.length} на участке</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
     <section class="panel map-panel" aria-labelledby="map-title">
       <div class="panel-head"><div><h2 id="map-title">Схема участка в реальном времени</h2>
         <small>Время идёт в реальном ходе; поезда, ТО, вагоны и происшествия создаются сами. Сверху нечётный путь (←), снизу чётный (→).</small></div></div>

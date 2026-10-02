@@ -9,7 +9,7 @@ import { HowPage } from './how.js';
 import { StationPage } from './station.js';
 import { LogPage } from './log.js';
 import { FleetPage } from './fleet.js';
-import { NetworkPage } from './network-map.js';
+import { NetworkPage, useNetworkTotals } from './network-map.js';
 import { QuickSearch } from './search.js';
 
 const NAV = [
@@ -54,12 +54,14 @@ function Topbar({ data, onReset, onSearch }) {
   const dis = !app.online || app.busy;
   const liveMs = useLiveNow(1);
   const step = m => act({ type: 'advance', minutes: m });
+  const totals = useNetworkTotals();
   return html`<header class="topbar">
     <button class="global-search" type="button" onClick=${onSearch} aria-label="Поиск поездов и станций"><${Icon} name="search" size=${17} /><span>Поезд или станция</span><kbd>⌘ / Ctrl K</kbd></button>
     <div class="clock" aria-label="Время модели">
       <${Icon} name="clock" size=${18} />
       <div><strong class="num">${time(liveMs)}</strong><small>${dateLong(liveMs)} · ${clock.running ? (clock.synced && data.speed === 1 ? 'реальное время' : `ускорено ×${data.speed}`) : 'на паузе'}</small></div>
     </div>
+    ${totals && html`<a class="net-chip-top" href=${href('/')} title="Поездов на всей сети КТЖ сейчас (модель участка — отдельно)"><${Icon} name="train-front" size=${16} /><span>Сеть: <strong class="num">${(totals.total + data.trains.length).toLocaleString('ru-RU')}</strong> поездов</span></a>`}
     <div class="btn-group" role="group" aria-label="Перемотать время вперёд">
       ${[[15, '+15 мин'], [30, '+30 мин'], [60, '+1 час']].map(([m, l]) => html`<${Button} key=${m} size="sm" variant="secondary" disabled=${dis} reason=${app.online ? 'Выполняется действие' : 'Нет соединения с сервером'} onClick=${() => step(m)}>${l}</${Button}>`)}
     </div>
