@@ -470,3 +470,43 @@ test('automation settings can be changed from the interface', async ({ page, req
   await page.getByLabel('Станции работают сами').click();
   await expect.poll(async () => (await getState(request)).auto.stations).toBe(false);
 });
+
+test('fleet page: approximate locomotive park, depots, delivery figures and sources', async ({ page }) => {
+  await page.goto('/#/fleet');
+  await expect(page.getByRole('heading', { name: 'Парк и сеть', level: 1 })).toBeVisible();
+  await expect(page.locator('.kpi', { hasText: 'Электровозы' })).toContainText('≈');
+  await expect(page.locator('.kpi', { hasText: 'Магистральные тепловозы' })).toContainText('≈');
+  await expect(page.locator('.kpi', { hasText: 'Станции' })).toContainText(/\d{3}/);
+  await expect(page.getByText('Новые поставки 2026')).toBeVisible();
+  await expect(page.locator('.series-now li').first()).toBeVisible();
+  await expect(page.getByRole('row', { name: /Атырау/ })).toBeVisible();
+  await expect(page.locator('.sources a').first()).toHaveAttribute('href', /^https:/);
+  await expect(page.getByText(/не официальная статистика/)).toBeVisible();
+});
+
+test('fleet page: search across all stations of Kazakhstan and open one on the map', async ({ page }) => {
+  await page.goto('/#/fleet');
+  await page.getByRole('searchbox', { name: 'Найти станцию' }).fill('Тараз');
+  const row = page.locator('.station-list li', { hasText: 'Тараз' }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'На карте' }).click();
+  await expect(page).toHaveURL(/#\/map/);
+  await expect(page.locator('.net-chip', { hasText: 'Станции' })).toHaveAttribute('aria-pressed', 'true', { timeout: 10000 });
+});
+
+test('map: national station layers, depots and station search', async ({ page }) => {
+  await page.goto('/#/map');
+  const bar = page.getByRole('group', { name: 'Сеть железных дорог Казахстана' });
+  await expect(bar).toBeVisible();
+  const stations = bar.getByRole('button', { name: /Станции/ });
+  await expect(stations).toBeEnabled({ timeout: 15000 });
+  await expect(stations).toContainText(/\d{3}/);
+  await stations.click();
+  await expect(stations).toHaveAttribute('aria-pressed', 'true');
+  await bar.getByRole('button', { name: /Локомотивные депо/ }).click();
+  await expect(page.locator('.geo-depot').first()).toBeVisible();
+  await bar.getByRole('searchbox', { name: 'Найти станцию Казахстана' }).fill('Атырау');
+  await bar.getByRole('button', { name: /Атырау/ }).first().click();
+  await expect(page.locator('.leaflet-popup-content')).toContainText('Атырау', { timeout: 8000 });
+  await expect(page.locator('.fleet-summary.compact')).toContainText('Локомотивы КТЖ');
+});

@@ -7,6 +7,8 @@ import { placeTrains, describeTrain } from './trackmap.js';
 import { stationTraffic } from './station-metrics.js';
 import { CORRIDOR } from '/engine/rail-corridor.js';
 import { coordinateAt, indexOfLocation, prepareGeometry } from './geo-position.js';
+import { attachNetwork, NetworkBar } from './geo-network.js';
+import { FleetSummary } from './fleet.js';
 
 // A small railway silhouette: two cars and a cab at the leading end.
 // Rotate only the vehicle; the number remains upright at every track heading.
@@ -95,7 +97,8 @@ export function GeographicMap({ data }) {
       return marker;
     });
     const trains = new Map();
-    scene.current = { map, base, rails, bounds, stations, lines, trains };
+    const network = attachNetwork(L, map);
+    scene.current = { map, base, rails, bounds, stations, lines, trains, network };
     const observer = new ResizeObserver(() => map.invalidateSize()); observer.observe(container.current);
     let raf = 0, last = -Infinity, lastFollow = -Infinity;
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -146,7 +149,7 @@ export function GeographicMap({ data }) {
     };
     raf = requestAnimationFrame(draw);
     const timeout = setTimeout(() => { if (alive && !successes) setBackground('error'); }, 10000);
-    return () => { alive = false; clearTimeout(timeout); cancelAnimationFrame(raf); observer.disconnect(); scene.current = null; map.remove(); };
+    return () => { alive = false; clearTimeout(timeout); cancelAnimationFrame(raf); observer.disconnect(); network.destroy(); scene.current = null; map.remove(); };
   }, []);
 
   useEffect(() => {
@@ -205,6 +208,7 @@ export function GeographicMap({ data }) {
       <label class="geo-check"><input type="checkbox" checked=${numbers} onChange=${e => setNumbers(e.target.checked)} />Всегда показывать номера</label>
     </div>
     <div class="geo-filterbar"><${Segmented} label="Показать поезда" value=${filter} options=${FILTERS} onChange=${setFilter} /><span class="geo-visible-count">На карте <strong>${visibleTrains.length}</strong> / ${live.length}</span></div>
+    <${NetworkBar} scene=${scene} />
     <div class="geo-layout">
       <div class="geo-map-wrap"><div ref=${container} class="geo-map" role="region" aria-label="Географическая карта железнодорожного участка"></div>
         ${!visibleTrains.length && html`<div class="geo-empty-filter" role="status"><strong>По этому фильтру поездов нет</strong><button type="button" onClick=${() => setFilter('all')}>Показать все поезда</button></div>`}
@@ -217,6 +221,7 @@ export function GeographicMap({ data }) {
         : html`${data.blocked && !data.planApproved && html`<div class="geo-plan-alert"><${Icon} name="triangle-alert" size=${17} /><div><strong>Нужно подтвердить план пропуска</strong><a href=${href('/decisions')}>Сравнить варианты</a></div></div>`}<div class="geo-overview-stats"><span><strong>${live.filter(isMoving).length}</strong> в движении</span><span><strong>${live.filter(r => !isMoving(r)).length}</strong> без движения</span></div>
           <section class="geo-attention" aria-label="Требуют внимания"><h3>Требуют внимания <span>${attention.length}</span></h3>${attention.length ? html`<ul>${attention.slice(0,4).map(r => html`<li key=${r.t.number}><button type="button" onClick=${() => chooseTrain(r.t.number)}><${Icon} name=${r.broken ? 'triangle-alert' : 'clock'} size=${16} /><span><strong>№${r.t.number}</strong><small>${r.broken ? 'Неисправность' : r.stopped && !r.planned ? 'Ожидает пропуска' : `Задержка ${r.t.delay} мин`}</small></span><${Icon} name="chevron-right" size=${15} /></button></li>`)}</ul>${attention.length > 4 && html`<button class="geo-text-action" type="button" onClick=${() => setFilter('attention')}>Показать все ${attention.length} на карте</button>`}` : html`<p class="geo-clear"><${Icon} name="circle-check" size=${17} />Неплановых остановок и задержек от 5 минут нет.</p>`}</section>
           <section class="geo-segment-status" aria-label="Состояние перегонов"><h3>Перегоны</h3>${closures.length || restrictions.length ? html`<ul>${closures.map(c => html`<li key=${c.id}><${Icon} name="ban" size=${15} /><span>${data.stations[c.segment].name} — ${data.stations[c.segment+1].name}<small>${{odd:'Нечётный путь закрыт',even:'Чётный путь закрыт',both:'Оба пути закрыты'}[c.track]}</small></span></li>`)}${restrictions.map(r => html`<li key=${r.segment}><${Icon} name="gauge" size=${15} /><span>${data.stations[r.segment].name} — ${data.stations[r.segment+1].name}<small>Ограничение ${r.kmh} км/ч</small></span></li>`)}</ul>` : html`<p class="muted">Все 9 перегонов открыты.</p>`}</section>
+          <${FleetSummary} data=${data} compact />
           <label class="geo-station-picker">Перейти к станции<select aria-label="Найти станцию на карте" value="" onChange=${e => { if(e.target.value) chooseStation(e.target.value); }}><option value="">Выберите станцию</option>${data.stations.map(s => html`<option value=${s.id}>${s.name}</option>`)}</select></label><p class="geo-hint">Нажмите на поезд или станцию, чтобы открыть сведения и команды.</p>`}
       </aside>
     </div>

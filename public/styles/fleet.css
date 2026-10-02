@@ -1,0 +1,46 @@
+/* ===== Парк, станции Казахстана на карте ===== */
+.net-bar { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); position: relative; }
+.net-title { display: inline-flex; gap: 6px; align-items: center; color: var(--text-2); }
+.net-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); font-weight: 550; font-size: var(--text-sm); }
+.net-chip b { color: var(--text-3); font-weight: 600; }
+.net-chip.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent-ink); }
+.net-chip:disabled { opacity: .5; cursor: progress; }
+.net-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; min-height: 34px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); flex: 1 1 260px; max-width: 380px; }
+.net-search input { border: 0; outline: 0; background: none; flex: 1; min-width: 0; }
+.net-results { position: absolute; z-index: 800; top: calc(100% + 4px); right: 14px; width: min(380px, calc(100% - 28px)); max-height: 280px; overflow: auto; list-style: none; margin: 0; padding: 4px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-2); }
+.net-results button { width: 100%; display: grid; text-align: left; gap: 1px; padding: 8px 10px; border: 0; background: none; border-radius: var(--radius-s); }
+.net-results button:hover { background: var(--accent-bg); }
+.net-error { color: var(--danger); font-size: var(--text-sm); }
+.geo-net-popup { display: grid; gap: 4px; min-width: 190px; font: 400 13px/1.4 var(--font); }
+.geo-net-popup strong { font-size: 14px; }
+.geo-net-popup small { color: var(--text-3); }
+.geo-net-label { background: rgb(255 255 255 / 88%); border: 0; box-shadow: none; padding: 1px 5px; font: 600 11px/1.3 var(--font); color: #123d54; }
+.geo-net-label::before { display: none; }
+.geo-net-tip { font: 500 12px/1.3 var(--font); }
+.geo-depot { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: #fff; font: 700 13px/1 var(--font); border: 2px solid #fff; box-shadow: 0 1px 6px rgb(0 0 0 / 35%); }
+.geo-depot.diesel { background: #7a4a11; }
+.geo-depot.electric { background: #6b5bd2; }
+.fleet-summary { display: grid; gap: 8px; }
+.fleet-summary h3 { display: flex; gap: 8px; align-items: center; }
+.fleet-total strong { font-size: var(--text-lg); letter-spacing: -0.02em; }
+.fleet-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.fleet-bars li { display: grid; grid-template-columns: minmax(170px, 1.1fr) 2fr auto; gap: 10px; align-items: center; }
+.fb-name { display: inline-flex; align-items: center; gap: 6px; }
+.fb-bar { height: 12px; border-radius: 6px; background: #e1e9ee; overflow: hidden; }
+.fb-bar i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.fleet-bars li:nth-child(2) .fb-bar i { background: #7a4a11; }
+.fleet-bars li:nth-child(3) .fb-bar i { background: #8798a4; }
+.fleet-corridor { color: var(--text-2); font-size: var(--text-sm); }
+.fleet-summary.compact .fleet-bars li { grid-template-columns: 1fr 1fr auto; }
+.fleet-series { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.fleet-series ul, .deliveries, .series-now, .sources { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.fleet-series li { display: grid; gap: 1px; }
+.fleet-series span { color: var(--text-2); font-size: var(--text-sm); }
+.fleet-series h3 { display: flex; gap: 6px; align-items: center; }
+.deliveries li { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.deliveries strong { font-size: var(--text-lg); }
+.series-now li { display: flex; justify-content: space-between; gap: 8px; }
+.station-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 4px 20px; max-height: 420px; overflow: auto; }
+.station-list li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+.station-list li > span { display: grid; }
+@media (max-width: 760px) { .fleet-bars li { grid-template-columns: 1fr auto; } .fleet-bars .fb-bar { grid-column: 1 / -1; order: 3; } }

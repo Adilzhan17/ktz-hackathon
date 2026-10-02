@@ -8,6 +8,7 @@ import { Overview, DecisionsPage, Trains, Stations } from './pages.js';
 import { HowPage } from './how.js';
 import { StationPage } from './station.js';
 import { LogPage } from './log.js';
+import { FleetPage } from './fleet.js';
 import { QuickSearch } from './search.js';
 
 const NAV = [
@@ -17,9 +18,10 @@ const NAV = [
   { page: 'stations', path: '/stations', label: 'Станции', icon: 'building-2', also: ['station'] },
   { page: 'log', path: '/log', label: 'Журнал', icon: 'list-checks' },
   { page: 'map', path: '/map', label: 'Карта', icon: 'map-pin' },
+  { page: 'fleet', path: '/fleet', label: 'Парк и сеть', icon: 'truck' },
   { page: 'how', path: '/how', label: 'Как это работает', icon: 'book-open' },
 ];
-const TITLES = { map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
+const TITLES = { fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
 function Nav({ page, onAbout, attention, mini, onMini }) {
   const more = useRef(null);
@@ -37,7 +39,7 @@ function Nav({ page, onAbout, attention, mini, onMini }) {
     </a>
     <ul>${NAV.map(n => html`<li key=${n.page}><a href=${href(n.path)} title=${n.label} class=${page === n.page || n.also?.includes(page) ? 'on' : ''}
       aria-current=${page === n.page || n.also?.includes(page) ? 'page' : undefined}><${Icon} name=${n.icon} size=${19} /><span>${n.label}</span>${n.page === 'decisions' && attention > 0 && html`<b class="nav-badge" aria-label=${`Требует решения: ${attention}`}>${attention}</b>`}</a></li>`)}</ul>
-    <details class="mobile-more" ref=${more}><summary><${Icon} name="menu" size=${19} /><span>Ещё</span></summary><div class="more-links"><a href=${href('/map')}><${Icon} name="map-pin" size=${18} />Карта</a><a href=${href('/log')}><${Icon} name="list-checks" size=${18} />Журнал</a><a href=${href('/how')}><${Icon} name="book-open" size=${18} />Как это работает</a><button type="button" onClick=${() => { more.current.open = false; onAbout(); }}><${Icon} name="info" size=${18} />О системе</button></div></details>
+    <details class="mobile-more" ref=${more}><summary><${Icon} name="menu" size=${19} /><span>Ещё</span></summary><div class="more-links"><a href=${href('/map')}><${Icon} name="map-pin" size=${18} />Карта</a><a href=${href('/fleet')}><${Icon} name="truck" size=${18} />Парк и сеть</a><a href=${href('/log')}><${Icon} name="list-checks" size=${18} />Журнал</a><a href=${href('/how')}><${Icon} name="book-open" size=${18} />Как это работает</a><button type="button" onClick=${() => { more.current.open = false; onAbout(); }}><${Icon} name="info" size=${18} />О системе</button></div></details>
     <div class="nav-foot">
       <img class="wordmark" src="/assets/ktz-wordmark.png" alt="Қазақстан темір жолы" />
       <button type="button" class="nav-link" onClick=${onAbout} title="О системе"><${Icon} name="info" size=${18} /><span>О системе</span></button>
@@ -86,6 +88,7 @@ function App() {
     trains: html`<${Trains} data=${data} />`,
     stations: html`<${Stations} data=${data} />`,
     map: html`<${MapPage} data=${data} />`,
+    fleet: html`<${FleetPage} data=${data} />`,
     station: html`<${StationPage} data=${data} params=${route.params} />`,
     log: html`<${LogPage} data=${data} />`,
   }[route.page];
