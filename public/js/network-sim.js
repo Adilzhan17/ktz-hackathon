@@ -182,7 +182,7 @@ const eventMemo = { key: '', list: [] };
 
 /** События сети за последние windowMin минут: отправления, прибытия, стоянки (по расписанию и вынужденные). */
 export function networkEvents(sim, nowMs, windowMin = 360) {
-  const key = `${sim.services.length}|${Math.floor(nowMs / 60000)}|${windowMin}`;
+  const key = `${sim.services.length}|${Math.floor(nowMs / 5000)}|${windowMin}`;
   if (eventMemo.key === key) return eventMemo.list;
   const now = nowMs / 60000 + TZ, from = now - windowMin;
   const list = [];

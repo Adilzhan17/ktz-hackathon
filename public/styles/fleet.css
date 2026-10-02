@@ -99,3 +99,4 @@
 .toolbar { max-width: 100%; }
 @media (max-width: 700px) { .search, .search input { min-width: 0; width: 100%; } .segmented { max-width: 100%; } }
 .tab-panel { grid-template-columns: minmax(0, 1fr); }
+.net-time[hidden] { display: none; }

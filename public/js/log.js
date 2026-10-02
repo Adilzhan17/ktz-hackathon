@@ -20,8 +20,8 @@ export function LogPage({ data }) {
   const [windowMin, setWindowMin] = useState(360);
   const [limit, setLimit] = useState(PAGE);
   const sim = useSim();
-  const now = useLiveNow(1 / 30);
-  const net = useMemo(() => (sim && !sim.error ? networkEvents(sim, now, windowMin) : []), [sim, Math.floor(now / 60000), windowMin]);
+  const now = useLiveNow(1 / 5);
+  const net = useMemo(() => (sim && !sim.error ? networkEvents(sim, now, windowMin) : []), [sim, Math.floor(now / 5000), windowMin]);
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const section = data.log.filter(e => e.at >= now - windowMin * 60000).map(e => ({ at: e.at, kind: 'section', text: e.text, route: 'Караганда — Мойынты', scope: 'section' }));
@@ -30,10 +30,10 @@ export function LogPage({ data }) {
       .filter(e => (kind === 'all' || (kind === 'depart' ? ['depart', 'resume'].includes(e.kind) : e.kind === kind)) && (route === 'all' || e.routeId === route)
         && (!q || `${e.text} ${e.route || ''}`.toLowerCase().includes(q)))
       .sort((a, b) => b.at - a.at);
-  }, [net, data.log, scope, kind, route, query, windowMin]);
+  }, [net, data.log, scope, kind, route, query, windowMin, Math.floor(now / 5000)]);
   const reset = fn => v => { fn(v); setLimit(PAGE); };
   const forced = net.filter(e => e.forced).length;
-  return html`<${PageHeader} title="Журнал" subtitle=${`События всей сети за выбранный период: ${net.length.toLocaleString('ru-RU')} записей на сети, из них вынужденных остановок ${forced}`} />
+  return html`<${PageHeader} title="Журнал" subtitle=${`В реальном времени, обновляется каждые 5 секунд. События всей сети за выбранный период: ${net.length.toLocaleString('ru-RU')} записей на сети, из них вынужденных остановок ${forced}`} />
     <section class="panel">
       <${Tabs} label="Журнал" value=${tab} idPrefix="lg" onChange=${setTab}
         tabs=${[{ value: 'events', label: 'События', count: rows.length > 999 ? '999+' : rows.length }, { value: 'notices', label: 'Уведомления пассажирам', count: data.notifications.length }]} />

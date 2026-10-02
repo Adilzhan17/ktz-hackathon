@@ -110,9 +110,9 @@ export function NetworkPage({ data }) {
   const [selected, setSelected] = useState(app.ui.selectedNetTrain || null);
   const [hover, setHover] = useState(null);
   const [background, setBackground] = useState('loading');
-  const [speed, setSpeedState] = useState(300);
+  const [speed, setSpeedState] = useState(1);
   const [paused, setPaused] = useState(false);
-  const clockRef = useRef({ base: liveNow(), perf: performance.now(), mult: 300, paused: false });
+  const clockRef = useRef({ base: liveNow(), perf: performance.now(), mult: 1, paused: false });
   const netNow = () => { const c = clockRef.current; return c.paused ? c.base : c.base + (performance.now() - c.perf) * c.mult; };
   const setClock = patch => { const c = clockRef.current; const base = netNow(); clockRef.current = { ...c, base, perf: performance.now(), ...patch }; };
   const chooseSpeed = v => { setSpeedState(v); setClock({ mult: v }); };
@@ -226,7 +226,7 @@ export function NetworkPage({ data }) {
         <${Segmented} label="Показать поезда" value=${filter} options=${FILTERS} onChange=${setFilter} />
         <${Segmented} label="Подписи над поездами" value=${labels} options=${LABELS} onChange=${setLabels} />
         <span class="net-count">На карте <strong>${fmt(shown.length)}</strong> из ${fmt(trains.length)}</span>
-        <div class="net-time" role="group" aria-label="Скорость показа сети">
+        <div class="net-time" hidden role="group" aria-label="Скорость показа сети">
           <${Button} size="sm" variant=${paused ? 'primary' : 'secondary'} icon=${paused ? 'play' : 'pause'} onClick=${togglePause}>${paused ? 'Пуск' : 'Пауза'}</${Button}>
           <${Segmented} label="Скорость показа" value=${speed} options=${DISPLAY_SPEEDS} onChange=${chooseSpeed} /></div>
       </div>
