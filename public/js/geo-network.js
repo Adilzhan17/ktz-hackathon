@@ -39,7 +39,7 @@ export function attachNetwork(L, map) {
   };
   const build = kind => (kind === 'station' ? data.net.stations : data.net.halts).filter(r => !corridorNodes.has(r[0])).map(rec => {
     const station = kind === 'station';
-    const m = L.circleMarker([rec[2], rec[3]], { renderer: canvas, radius: station ? 4.2 : 2.6, weight: station ? 1.6 : 1, color: '#fff',
+    const m = L.circleMarker([rec[2], rec[3]], { renderer: canvas, radius: station ? 5 : 3.2, weight: station ? 1.6 : 1, color: '#fff',
       fillColor: station ? '#00566f' : '#6f8594', fillOpacity: 0.95 });
     m.bindTooltip(esc(rec[1]), { direction: 'top', offset: [0, -4], className: 'geo-net-tip' });
     m.bindPopup(popup(kind, rec));
@@ -52,13 +52,20 @@ export function attachNetwork(L, map) {
     const zoom = map.getZoom();
     const bounds = map.getBounds();
     const want = new Set();
-    if (zoom >= 9) {
+    if (zoom >= 5.5) {
+      // подписи прореживаем по сетке экрана: одна на ячейку, чтобы названия не накладывались
+      const cw = zoom >= 9 ? 96 : 120, ch = 22, taken = new Set();
       const pools = [];
       if (map.hasLayer(layers.stations)) pools.push(markers.stations);
-      if (map.hasLayer(layers.halts) && zoom >= 11) pools.push(markers.halts);
+      if (map.hasLayer(layers.halts) && zoom >= 9) pools.push(markers.halts);
       for (const pool of pools) for (const m of pool) {
-        if (want.size >= 70) break;
-        if (bounds.contains(m.getLatLng())) want.add(m);
+        if (want.size >= 160) break;
+        if (/^\d+\s*км/i.test(m.netRec[1]) && zoom < 10) continue;
+        const ll = m.getLatLng();
+        if (!bounds.contains(ll)) continue;
+        const pt = map.latLngToContainerPoint(ll), key = `${Math.floor(pt.x / cw)}:${Math.floor(pt.y / ch)}`;
+        if (taken.has(key)) continue;
+        taken.add(key); want.add(m);
       }
     }
     for (const m of [...labeled]) if (!want.has(m)) {

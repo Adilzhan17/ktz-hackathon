@@ -166,6 +166,7 @@ export function NetworkPage({ data }) {
       attribution: 'Railway style: <a href="https://www.openrailwaymap.org">OpenRailwayMap</a> (CC-BY-SA 2.0)' }).addTo(map);
     const network = attachNetwork(L, map);
     network.set('stations', true);
+    network.set('halts', true);
     const renderer = L.canvas({ padding: 0.3 });
     const selectedRoute = L.polyline([], { color: '#bf2520', weight: 4, opacity: 0.8, interactive: false }).addTo(map);
     CORRIDOR.segments.forEach(points => L.polyline(points, { color: '#fff', weight: 7, opacity: 0.95, interactive: false }).addTo(map));
