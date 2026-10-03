@@ -9,7 +9,8 @@ import { networkEvents, networkItinerary } from './network-sim.js';
 import { stationBoard } from './network-detail-data.js';
 import { TrainDetails } from './network-details.js';
 import { routeStations, routeSegments, routeCharacter } from './route-profile.js';
-import { RouteSchematic } from './route-schematic.js';
+import { TrackMap } from './trackmap.js';
+import { networkTrackData } from './network-track-data.js';
 import { RouteGid } from './route-gid.js';
 import { IncidentPanel } from './dispatch-incidents.js';
 import { DECISION } from './log.js';
@@ -72,7 +73,6 @@ export function DispatcherPage({ data, routeId }) {
   const clock = useLiveNow(1);
   const [selected, setSelected] = useState(null);
   const [dialog, setDialog] = useState(null);
-  const [seg, setSeg] = useState(null);
   const route = sim?.byId?.get(routeId);
   const mine = useMemo(() => trains.filter(t => t.routeId === routeId), [trains, routeId]);
   if (failed) return html`<${PageHeader} title="Диспетчерская панель" /><${Empty} icon="circle-alert" title="Не удалось загрузить маршруты">Обновите страницу.</${Empty}>`;
@@ -84,6 +84,7 @@ export function DispatcherPage({ data, routeId }) {
   const incHere = incidents.filter(i => i.routeId === route.id && (i.until ?? Infinity) > now);
   const delaySum = mine.reduce((n, t) => n + (t.stopped && !t.planned ? Math.round(t.waitedMin + t.restMin) : 0), 0);
   const picked = mine.find(t => t.uid === selected);
+  const trackData = useMemo(() => networkTrackData(data, route, mine, now, incidents), [data.baseTime, route.id, mine, incidents, Math.floor(now / 1000)]);
   const pick = uid => setSelected(uid);
   return html`<${PageHeader} title="Диспетчерская панель" subtitle="Вся сеть КТЖ по маршрутам: схема, график движения, события и решения модели" />
     <div class="dp-picker panel"><label class="schedule-field"><span>Маршрут</span><select value=${route.id} onChange=${e => go(`/overview?route=${e.target.value}`)} aria-label="Маршрут диспетчера">${sim.routes.map(r => html`<option key=${r.id} value=${r.id}>${r.name}</option>`)}</select></label></div>
@@ -98,16 +99,16 @@ export function DispatcherPage({ data, routeId }) {
           <${Kpi} label="Вынужденные стоянки" icon="octagon-alert" tone=${forced.length ? 'danger' : 'neutral'} value=${forced.length} note=${forced.length ? `простой в сумме ${delaySum} мин` : 'простоев нет'} />
           <${Kpi} label="События диспетчера" icon="siren" tone=${incHere.length ? 'danger' : 'neutral'} value=${incHere.length} note=${incHere.length ? 'закрытия, ограничения, поломки' : 'движение по графику'} />
         </section>
-        <section class="panel" aria-labelledby="sch-h"><div class="panel-head"><div><h2 id="sch-h">Схема маршрута</h2><small>Положение поездов в масштабе километров, пути, станции и события на линии</small></div></div>
-          <${RouteSchematic} route=${route} trains=${mine} incidents=${incHere} now=${now} selected=${selected} onSelect=${pick} onSegment=${s => setSeg(s.i)} focusSegment=${seg} />
+        <section class="panel" aria-labelledby="sch-h"><div class="panel-head"><div><h2 id="sch-h">Схема маршрута</h2><small>Поезда движутся в реальном времени: пути, станции, закрытия и ограничения на линии</small></div></div>
+          <${TrackMap} key=${route.id} data=${trackData} selectedTrain=${picked ? String(picked.number) : null} onTrain=${number => setSelected(number ? mine.find(t => String(t.number) === number)?.uid || null : null)} onStation=${() => {}} />
           ${picked ? html`<div class="rs-picked"><div><strong>№${picked.number} · ${picked.label}</strong><span>${picked.from} → ${picked.to} · ${picked.loco.series} · ${picked.wagons} ваг. · ${picked.stopped ? `стоит: ${picked.station || 'на перегоне'} (${picked.reason})` : `${picked.speedKmh} км/ч, пройдено ${Math.round(picked.progress * 100)}%`}</span></div>
             <div class="btn-row"><${Button} size="sm" variant="primary" icon="file-text" onClick=${() => setDialog(picked.uid)}>Паспорт поезда</${Button}><${Button} size="sm" variant="ghost" icon="x" onClick=${() => setSelected(null)}>Снять</${Button}></div></div>`
-            : html`<p class="muted pad">Нажмите на поезд, чтобы увидеть его состояние, или на перегон, чтобы выбрать его для события.</p>`}
+            : ''}
         </section>
         <section class="panel" aria-labelledby="gid-h"><div class="panel-head"><div><h2 id="gid-h">График движения (ГИД)</h2><small>Исполненное и прогнозное движение маршрута, стоянки и зоны событий</small></div></div>
           <${RouteGid} sim=${sim} route=${route} incidents=${incHere} now=${now} selected=${selected} onSelect=${pick} /></section>
         <div class="dp-two">
-          <${IncidentPanel} sim=${sim} route=${route} trains=${mine} incidents=${incidents} now=${now} focusSegment=${seg} onFocusSegment=${setSeg} />
+          <${IncidentPanel} sim=${sim} route=${route} trains=${mine} incidents=${incidents} now=${now} />
           <div class="dp-col"><${StationPost} sim=${sim} route=${route} trains=${mine} now=${now} onTrain=${pick} /><${RouteJournal} sim=${sim} route=${route} now=${now} /></div>
         </div>
       </div>

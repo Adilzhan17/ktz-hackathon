@@ -551,9 +551,9 @@ test('statistics page: decisions, savings, per-route and live snapshot sections'
 test('dispatcher panel: route schematic, ГИД, closure with variants and approval change the route', async ({ page, request }) => {
   await page.goto('/#/overview?route=AST-ALA');
   await expect(page.getByRole('heading', { name: 'Астана — Алматы', level: 2 })).toBeVisible();
-  await expect(page.getByRole('group', { name: /Схема маршрута Астана — Алматы/ })).toBeVisible();
+  await expect(page.locator('.trackmap')).toBeVisible();
   await expect(page.getByRole('img', { name: /График движения маршрута/ })).toBeVisible();
-  await expect(page.locator('.rs-train').first()).toBeAttached();
+  await expect(page.locator('.trackmap .mtrain').first()).toBeAttached();
   // другой маршрут из списка слева
   await page.locator('.dp-rail').getByRole('link', { name: /Караганда — Павлодар/ }).click();
   await expect(page).toHaveURL(/route=KRG-PAV/);

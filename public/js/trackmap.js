@@ -36,16 +36,6 @@ export const describeTrain = (data, rec, tMin) => trainStatus(data, rec, tMin);
 /** Кто занимает перегон в момент tMin (для объяснения, почему другой стоит). */
 function blockerOf(data, tMin, seg, exceptNumber) {
   for (const t of data.trains) {
-    if (t.network) {
-      const nt = t.network, pos = t.diagramPosition, odd = t.direction === 'odd';
-      const idx = Math.round(pos), key = `${idx}:${odd}`, count = slots.get(key) || 0;
-      if (nt.stopped) slots.set(key, count + 1);
-      out.push({ t, odd, loc: nt.stopped ? { kind: 'wait', idx } : { kind: 'move', from: Math.floor(pos), to: Math.ceil(pos), f: pos % 1 },
-        segment: Math.min(last - 1, Math.floor(pos)), x: stationX(pos), y: (odd ? Y_ODD : Y_EVEN) + (nt.stopped ? (odd ? -1 : 1) * (26 + count * 24) : 0),
-        stopped: nt.stopped && !nt.planned, planned: nt.planned, broken: /неисправност/.test(nt.reason), reason: nt.reason,
-        waitedMin: Math.round(nt.waitedMin || 0), restMin: nt.restMin });
-      continue;
-    }
     if (t.number === exceptNumber) continue;
     const loc = locate(t, tMin);
     if (loc?.kind === 'move' && segOf(loc.from, loc.to) === seg) return t;
@@ -59,6 +49,27 @@ export function placeTrains(data, tMin) {
   const slots = new Map();
   const last = data.stations.length - 1;
   for (const t of data.trains) {
+    if (t.network) {
+      const nt = t.network, pos = t.diagramPosition, odd = t.direction === 'odd';
+      const idx = Math.max(0, Math.min(last, Math.round(pos))), key = `${idx}:${odd}`, n = slots.get(key) || 0;
+      const broken = /неисправн/.test(nt.reason);
+      const seg = Math.max(0, Math.min(last - 1, Math.floor(pos)));
+      const c = closureAt(data, seg, tMin);
+      if (nt.stopped) {
+        slots.set(key, n + 1);
+        const mid = Math.abs(pos - idx) > 0.12;
+        out.push({ t, odd, loc: mid ? { kind: 'wait', idx: pos, since: tMin - (nt.waitedMin || 0), until: tMin + nt.restMin } : { kind: 'wait', idx, since: tMin - (nt.waitedMin || 0), until: tMin + nt.restMin },
+          stopped: !nt.planned, planned: nt.planned, wrong: false, service: false, broken, mid, held: false, segment: seg,
+          x: mid ? stationX(pos) : stationX(idx) + [0, 66, -66, 132][n % 4] * (odd ? -1 : 1),
+          y: mid ? (odd ? Y_ODD : Y_EVEN) : (odd ? Y_ODD - 26 - 22 * (Math.floor(n / 4) % 2) : Y_EVEN + 26 + 22 * (Math.floor(n / 4) % 2)),
+          reason: nt.reason, waitedMin: Math.round(nt.waitedMin || 0), restMin: nt.restMin });
+      } else {
+        const wrong = Boolean(c && c.track === t.direction && c.track !== 'both');
+        out.push({ t, odd, loc: { kind: 'move', from: Math.floor(pos), to: Math.ceil(pos) || 1, f: pos % 1 }, stopped: false, planned: false, wrong, service: false, broken: false, mid: false, held: false, segment: seg,
+          x: stationX(pos), y: wrong ? (odd ? Y_EVEN : Y_ODD) : (odd ? Y_ODD : Y_EVEN), reason: '' });
+      }
+      continue;
+    }
     const loc = locate(t, tMin);
     if (!loc) continue;
     const odd = t.direction === 'odd';
@@ -289,12 +300,13 @@ export function TrackMap({ data, selectedTrain, onTrain, onStation }) {
   return html`<div class="trackmap">
     <div class="map-toolbar">
       <div class="map-clock" aria-live="off"><${Icon} name="clock" size=${20} /><div><strong class="num">${time(now)}</strong><small>${dateLong(now)}</small></div></div>
-      <${Button} variant=${clock.running ? 'secondary' : 'primary'} icon=${clock.running ? 'pause' : 'play'} onClick=${toggleRun}>${clock.running ? 'Пауза' : 'Пуск'}</${Button}>
+      ${!data.network && html`<${Button} variant=${clock.running ? 'secondary' : 'primary'} icon=${clock.running ? 'pause' : 'play'} onClick=${toggleRun}>${clock.running ? 'Пауза' : 'Пуск'}</${Button}>`}
+      ${!data.network && html`
       <div class="speed" role="group" aria-label="Скорость времени">
         <${Segmented} label="Скорость времени" value=${data.speed} options=${SPEEDS} onChange=${v => act({ type: 'clock', speed: v })} />
         ${data.synced && data.speed === 1 ? html`<${Badge} tone="accent" icon="radio">реальное время</${Badge}>`
           : html`<${Button} size="sm" icon="locate-fixed" disabled=${ahead} reason="Модельное время опережает реальное: вернуться можно только сбросом модели" onClick=${() => act({ type: 'clock', sync: true })}>К реальному</${Button}>`}
-      </div>
+      </div>`}
       <div class="map-stats" role="status" aria-live="polite">
         <span><strong>${onLine}</strong> на линии</span>
         <span class=${stopped.length ? 'bad' : ''}><strong>${stopped.length}</strong> стоят</span>

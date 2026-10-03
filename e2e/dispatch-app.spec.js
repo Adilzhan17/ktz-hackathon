@@ -4,9 +4,8 @@ test('national dispatcher selects route and train, station post and phone stay u
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/#/overview?route=ARK-AST');
   await expect(page.getByRole('heading', { name: 'Аркалык — Астана', level: 2 })).toBeVisible();
-  await expect(page.locator('.rs-svg')).toBeVisible();
-  await page.getByRole('radio', { name: '8 пикс/км' }).click();
-  await page.locator('.rs-train').first().click();
+  await expect(page.locator('.trackmap')).toBeVisible();
+  await page.locator('.trackmap .mtrain').first().click();
   await page.getByRole('button', { name: 'Паспорт поезда' }).click();
   await expect(page.getByRole('dialog', { name: /Поезд №/ })).toBeVisible();
   await page.keyboard.press('Escape');
