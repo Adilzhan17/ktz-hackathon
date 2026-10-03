@@ -585,19 +585,19 @@ test('dispatcher panel API rejects invalid incidents', async ({ request }) => {
   }
 });
 
-test('model page: live network graph, data stream, metrics and characteristics', async ({ page }) => {
+test('model page: packets fly to the core in real time, data stream, metrics and characteristics', async ({ page }) => {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/#/engine');
   await expect(page.getByRole('heading', { name: 'Модель', level: 1, exact: true })).toBeVisible();
-  await expect(page.getByRole('group', { name: /Схема работы модели/ })).toBeVisible();
-  await expect(page.locator('.nn-node')).toHaveCount(19);
-  await page.getByRole('button', { name: /Профиль рейса/ }).click();
-  await expect(page.locator('.nn-detail')).toContainText('график остановок');
+  const canvas = page.getByRole('img', { name: /Ядро модели/ });
+  await expect(canvas).toBeVisible();
+  await canvas.click({ position: { x: 215, y: 99 } });
+  await expect(page.locator('.nn-detail')).toContainText('Рейсы, которые сейчас в пути');
   await expect.poll(async () => page.locator('.stream-line').count()).toBeGreaterThan(3);
   await expect(page.getByRole('heading', { name: 'Характеристики модели' })).toBeVisible();
   await expect(page.locator('.heat-row').first()).toBeVisible();
   const cycles = async () => Number(((await page.locator('.page-actions .badge').innerText()).match(/цикл ([\d\s\u00a0]+)/)?.[1] || '0').replace(/\D/g, ''));
   const first = await cycles();
-  await expect.poll(cycles, { timeout: 8000 }).toBeGreaterThan(first);
+  await expect.poll(cycles, { timeout: 5000 }).toBeGreaterThan(first + 3);   // 4 цикла в секунду
   expect(errors).toEqual([]);
 });

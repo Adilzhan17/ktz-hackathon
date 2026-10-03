@@ -5,8 +5,9 @@ import { Badge, Kpi, PageHeader, Empty } from './ui.js';
 import { useSim } from './network-data.js';
 import { useNetwork } from './geo-network.js';
 import { NODES } from './engine-graph.js';
-import { useEngine, HISTORY } from './engine-metrics.js';
-import { NeuralView, StreamFeed, Sparkline, Heatmap, Characteristics, fmt } from './engine-views.js';
+import { useEngine, HISTORY, CYCLES_PER_SECOND } from './engine-metrics.js';
+import { CoreView } from './engine-core-view.js';
+import { StreamFeed, Sparkline, Heatmap, Characteristics, fmt } from './engine-views.js';
 import { DECISION } from './log.js';
 
 const KINDS = ['send', 'accept', 'crew', 'yield', 'hold', 'repair', 'resolved'];
@@ -29,7 +30,7 @@ export function EnginePage() {
   const node = NODES.find(n => n.id === selected);
   const kindRows = KINDS.map(k => ({ label: DECISION[k].label, value: sample.byKind[k] || 0, tone: ['hold', 'repair'].includes(k) ? 'danger' : undefined }));
   const throughput = sample.ms > 0 ? Math.round(sample.trains / (sample.ms / 1000)) : 0;
-  return html`<${PageHeader} title="Модель" subtitle="Как работает расчёт прямо сейчас: какие данные приходят, что считается и что получается. Всё пересчитывается каждую секунду"
+  return html`<${PageHeader} title="Модель" subtitle="Как работает расчёт прямо сейчас: какие данные приходят, что считается и что получается. Расчёт идёт непрерывно, 4 цикла в секунду"
       actions=${html`<${Badge} tone="accent" icon="radio">цикл ${fmt(counters.cycles)} · ${time(sample.now)}</${Badge}>`} />
     <section class="kpis" aria-label="Работа модели">
       <${Kpi} label="Цикл расчёта" icon="cpu" value=${sample.ms.toFixed(1)} unit=" мс" note=${`поезда ${sample.trainsMs.toFixed(1)} · события ${sample.eventsMs.toFixed(1)} · варианты ${sample.variantsMs.toFixed(1)}`} />
@@ -39,15 +40,15 @@ export function EnginePage() {
       <${Kpi} label="События на линии" icon="siren" tone=${sample.incidents ? 'danger' : 'neutral'} value=${sample.incidents} note=${sample.incidents ? `вариантов пропуска: ${sample.variantsCount}` : 'движение по графику'} />
       <${Kpi} label="Память страницы" icon="database" value=${sample.heapMb ?? '—'} unit=${sample.heapMb ? ' МБ' : ''} note=${sample.heapMb ? 'JS-куча браузера' : 'браузер не сообщает'} />
     </section>
-    <section class="panel" aria-labelledby="nn-h"><div class="panel-head"><div><h2 id="nn-h">Нейросеть расчёта</h2><small>Слева данные, справа результат. Яркость узла — нагрузка, частицы — поток по связям. Нажмите на узел, чтобы подсветить его связи.</small></div></div>
-      <${NeuralView} samples=${samples} ctx=${ctx} selected=${selected} onSelect=${setSelected} tick=${counters.cycles} />
+    <section class="panel" aria-labelledby="nn-h"><div class="panel-head"><div><h2 id="nn-h">Ядро модели в работе</h2><small>Блоки данных летят к ядру, внутри идёт расчёт, результат разлетается по выходам. Каждая пачка — настоящий цикл расчёта (4 раза в секунду) или настоящее решение из журнала. Нажмите на узел, чтобы увидеть, что он считает.</small></div></div>
+      <${CoreView} sample=${sample} ctx=${ctx} selected=${selected} onSelect=${setSelected} cycle=${counters.cycles} />
       ${node ? html`<div class="nn-detail"><div><strong>${node.label}</strong><p>${node.hint}</p><code>${node.formula}</code></div>
-        <div class="nn-spark"><b class="num">${node.id === 'clock' ? ctx.clock : `${fmt(node.value(sample, ctx))} ${node.unit}`}</b><${Sparkline} values=${samples.map(s => node.value(s, ctx)).filter(v => typeof v === 'number')} width=${220} height=${44} label=${`Динамика: ${node.label}`} /><small>последние ${Math.min(HISTORY, samples.length)} с</small></div></div>`
+        <div class="nn-spark"><b class="num">${node.id === 'clock' ? ctx.clock : `${fmt(node.value(sample, ctx))} ${node.unit}`}</b><${Sparkline} values=${samples.map(s => node.value(s, ctx)).filter(v => typeof v === 'number')} width=${220} height=${44} label=${`Динамика: ${node.label}`} /><small>последние ${Math.round(Math.min(HISTORY, samples.length) / CYCLES_PER_SECOND)} с</small></div></div>`
         : html`<p class="muted pad"><${Icon} name="mouse-pointer-click" size=${15} class="inline" /> Выберите узел, чтобы увидеть, что он считает и по какой формуле.</p>`}
     </section>
     <div class="engine-two">
       <section class="panel" aria-labelledby="st-h"><div class="panel-head"><div><h2 id="st-h">Поток данных</h2><small>Вход → расчёт → выход и новые решения по мере появления</small></div></div><${StreamFeed} lines=${lines} /></section>
-      <section class="panel" aria-labelledby="mt-h"><div class="panel-head"><div><h2 id="mt-h">Метрики в реальном времени</h2><small>Последние ${Math.min(HISTORY, samples.length)} секунд</small></div></div>
+      <section class="panel" aria-labelledby="mt-h"><div class="panel-head"><div><h2 id="mt-h">Метрики в реальном времени</h2><small>Последние ${Math.round(Math.min(HISTORY, samples.length) / CYCLES_PER_SECOND)} секунд</small></div></div>
         <div class="spark-grid">
           ${[['Время цикла, мс', 'ms', 1], ['Поездов на линии', 'trains', 0], ['Вынужденные стоянки', 'forced', 0], ['Средняя скорость, км/ч', 'avgSpeed', 0], ['Решений за час', 'eventsHour', 0], ['Бригад на пределе', 'crewSoon', 0]].map(([label, key, d]) => html`<div key=${key} class="spark-card"><span>${label}</span><strong class="num">${d ? sample[key].toFixed(d) : fmt(sample[key])}</strong><${Sparkline} values=${series(key)} width=${190} height=${40} label=${label} /></div>`)}
         </div></section>

@@ -1,8 +1,7 @@
 // Визуализации страницы «Модель»: нейросетевой граф, ленты потока, спарклайны, тепловая карта, характеристики.
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useMemo } from 'preact/hooks';
 import { html, time } from './lib.js';
 import { Badge } from './ui.js';
-import { LAYERS, NODES, EDGES, layout } from './engine-graph.js';
 import { scheduledTrips, MODEL_PARAMS } from './network-sim.js';
 import { DECISION } from './log.js';
 
@@ -17,57 +16,6 @@ export function Sparkline({ values, width = 160, height = 38, label, color = 'va
     ${fill && html`<path d=${`${d} L${width} ${height} L0 ${height} Z`} fill=${color} opacity=".12"/>`}
     <path d=${d} fill="none" stroke=${color} stroke-width="1.8" stroke-linejoin="round"/>
     <circle cx=${pts.at(-1)[0]} cy=${pts.at(-1)[1]} r="3" fill=${color}/></svg>`;
-}
-
-/** Нейросетевой граф: слои данных → расчёт → оценка → результат, частицы бегут по связям. */
-export function NeuralView({ samples, ctx, selected, onSelect, tick }) {
-  const box = useRef(null);
-  const [W, setW] = useState(1000);
-  useEffect(() => {
-    const el = box.current; if (!el) return undefined;
-    const ro = new ResizeObserver(() => setW(Math.max(980, el.clientWidth)));
-    ro.observe(el); setW(Math.max(980, el.clientWidth));
-    return () => ro.disconnect();
-  }, []);
-  const H = 520;
-  const pos = useMemo(() => layout(W, H), [W]);
-  const last = samples.at(-1);
-  const values = useMemo(() => new Map(NODES.map(n => {
-    const series = samples.map(s => n.value(s, ctx)).filter(v => typeof v === 'number');
-    const v = last ? n.value(last, ctx) : 0;
-    const max = Math.max(1, ...series);
-    return [n.id, { v, act: typeof v === 'number' ? Math.min(1, v / max) * 0.85 + 0.15 : 0.7 }];
-  })), [samples, ctx]);
-  const related = useMemo(() => {
-    if (!selected) return null;
-    const set = new Set([selected]);
-    for (const [a, b] of EDGES) { if (a === selected) set.add(b); if (b === selected) set.add(a); }
-    return set;
-  }, [selected]);
-  const curve = (a, b) => { const mx = (a.x + b.x) / 2; return `M${a.x} ${a.y} C${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`; };
-  return html`<div class="neural" ref=${box}>
-    <svg width=${W} height=${H} viewBox=${`0 0 ${W} ${H}`} role="group" aria-label="Схема работы модели: данные на входе, расчёт, оценка и результат">
-      ${LAYERS.map((l, i) => { const x = pos.get(NODES.find(n => n.layer === l.id).id).x; return html`<text key=${l.id} x=${x} y="22" text-anchor="middle" class="nn-layer">${l.title}</text>`; })}
-      ${EDGES.map(([a, b, w], i) => {
-        const pa = pos.get(a), pb = pos.get(b), d = curve(pa, pb), act = (values.get(a).act + values.get(b).act) / 2;
-        const on = !related || (related.has(a) && related.has(b));
-        return html`<g key=${`${a}-${b}`} class=${`nn-edge ${on ? '' : 'dim'}`}>
-          <path d=${d} fill="none" stroke="var(--accent)" stroke-width=${0.6 + w * act * 2.2} opacity=${on ? 0.12 + act * 0.4 : 0.05}/>
-          ${[0, 1].map(k => html`<circle key=${k} r=${1.6 + w * 1.4} class="nn-particle"><animateMotion dur=${`${2.6 + (i % 5) * 0.45}s`} begin=${`${-((i * 0.37 + k * 1.3) % 3)}s`} repeatCount="indefinite" path=${d}/></circle>`)}</g>`;
-      })}
-      ${NODES.map(n => {
-        const p = pos.get(n.id), val = values.get(n.id), r = 10 + val.act * 9, sel = selected === n.id, dim = related && !related.has(n.id);
-        const text = n.id === 'clock' ? ctx.clock : `${fmt(val.v)}${n.unit ? ` ${n.unit}` : ''}`;
-        const left = n.layer === 'in';
-        return html`<g key=${n.id} class=${`nn-node ${sel ? 'sel' : ''} ${dim ? 'dim' : ''}`} transform=${`translate(${p.x} ${p.y})`} tabindex="0" role="button" aria-pressed=${sel}
-          aria-label=${`${n.label}: ${text}`} onClick=${() => onSelect(sel ? null : n.id)} onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(sel ? null : n.id); } }}>
-          <circle key=${tick} r=${r} class="nn-ring"/>
-          <circle r=${r} class=${`nn-core ${n.layer}`} opacity=${0.35 + val.act * 0.65}/>
-          <text y=${left ? 4 : 4} text-anchor="middle" class="nn-val">${n.id === 'clock' ? '⏱' : ''}</text>
-          <text x=${left ? -r - 8 : r + 8} y="-2" text-anchor=${left ? 'end' : 'start'} class="nn-label">${n.label}</text>
-          <text x=${left ? -r - 8 : r + 8} y="12" text-anchor=${left ? 'end' : 'start'} class="nn-num">${text}</text></g>`;
-      })}
-    </svg></div>`;
 }
 
 const TAG_TONE = { вход: 'neutral', расчёт: 'accent', выход: 'ink', решение: 'muted' };

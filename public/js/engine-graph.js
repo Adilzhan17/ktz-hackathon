@@ -1,11 +1,5 @@
 // Граф модели для визуализации: слои, узлы и связи. Значения берутся из живой сводки runCycle().
-export const LAYERS = [
-  { id: 'in', title: 'Данные на входе' },
-  { id: 'calc', title: 'Расчёт движения' },
-  { id: 'judge', title: 'Оценка и сравнение' },
-  { id: 'out', title: 'Результат' },
-];
-
+// Узлы модели: описание, формула и функция значения по живой сводке runCycle().
 const node = (id, layer, label, value, unit, hint, formula) => ({ id, layer, label, value, unit, hint, formula });
 
 export const NODES = [
@@ -29,22 +23,3 @@ export const NODES = [
   node('notify', 'out', 'Пассажирам', s => s.passengerForced, 'задержано', 'Пассажирские поезда, которым нужно сообщить о задержке.', 'уведомление при опоздании от 5 минут'),
   node('advice', 'out', 'Подсказки диспетчеру', s => s.recommendations, 'стоянок', 'Для каждой вынужденной стоянки модель считает, оправдана ли задержка.', 'сравнение потерь: держать или отправить'),
 ];
-
-// Связи между слоями: откуда → куда и сила зависимости.
-export const EDGES = [
-  ['trains', 'profile', 1], ['timetable', 'profile', 1], ['clock', 'profile', 0.8], ['crews', 'profile', 0.7], ['fleet', 'profile', 0.5],
-  ['trains', 'position', 0.9], ['clock', 'position', 1], ['incidents', 'queue', 1], ['incidents', 'position', 0.7], ['crews', 'limits', 1], ['fleet', 'limits', 1], ['timetable', 'queue', 0.5],
-  ['profile', 'position', 1], ['profile', 'limits', 0.6], ['position', 'blocks', 1], ['position', 'conflicts', 0.8], ['queue', 'conflicts', 1], ['queue', 'variants', 1], ['limits', 'conflicts', 0.6], ['limits', 'variants', 0.4],
-  ['blocks', 'positions', 0.8], ['conflicts', 'journal', 1], ['conflicts', 'advice', 1], ['variants', 'weight', 1], ['weight', 'advice', 0.8], ['blocks', 'eta', 0.5],
-  ['conflicts', 'eta', 0.9], ['weight', 'eta', 0.7], ['conflicts', 'notify', 0.8], ['variants', 'journal', 0.5], ['position', 'positions', 0.4],
-];
-
-/** Координаты узлов: слои слева направо, внутри слоя равномерно по высоте. */
-export function layout(width, height) {
-  const padX = 210, padY = 56, out = new Map();
-  LAYERS.forEach((layer, li) => {
-    const nodes = NODES.filter(x => x.layer === layer.id);
-    nodes.forEach((nd, k) => out.set(nd.id, { x: padX + li * ((width - 2 * padX) / (LAYERS.length - 1)), y: padY + (k + 0.5) * ((height - padY - 20) / nodes.length) }));
-  });
-  return out;
-}

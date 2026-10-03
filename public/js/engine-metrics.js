@@ -3,7 +3,8 @@ import { useEffect, useState } from 'preact/hooks';
 import { networkTrains, networkEvents, networkStats, networkDecisions, incidentVariants, networkIncidents } from './network-sim.js';
 import { liveNow } from './store.js';
 
-export const HISTORY = 120;
+export const HISTORY = 240;             // 60 секунд при 4 циклах в секунду
+export const CYCLES_PER_SECOND = 4;
 const store = { samples: [], lines: [], seen: new Set(), counters: { cycles: 0, trains: 0, events: 0, variants: 0, ms: 0 }, startedAt: Date.now() };
 const listeners = new Set();
 const clip = (arr, n) => (arr.length > n ? arr.slice(arr.length - n) : arr);
@@ -24,7 +25,8 @@ export function runCycle(sim) {
   const decisions = networkDecisions(trains);
   const byKind = {};
   for (const e of events) byKind[e.kind] = (byKind[e.kind] || 0) + 1;
-  const fresh = events.filter(e => !store.seen.has(e.id)).slice(0, 4);
+  const newEvents = events.filter(e => !store.seen.has(e.id));
+  const fresh = newEvents.slice(0, 6);
   for (const e of events) store.seen.add(e.id);
   if (store.seen.size > 6000) store.seen = new Set(events.map(e => e.id));
   const sample = {
@@ -33,14 +35,16 @@ export function runCycle(sim) {
     crewSoon: trains.filter(t => t.crew.leftMin < 45).length, toSoon: trains.filter(t => t.loco.toInH < 8).length,
     incidents: incidents.length, queue, bestLoss: Math.round(bestLoss), variantsCount: variants.length * 3,
     eventsHour: events.length, byKind, recommendations: decisions.length, passengerForced: trains.filter(t => t.category === 'passenger' && t.stopped && !t.planned).length,
-    heapMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
+    heapMb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, fresh,
   };
   const c = store.counters;
   c.cycles++; c.trains += sample.trains; c.events += events.length; c.variants += sample.variantsCount; c.ms += sample.ms;
-  const lines = [
+  const summary = c.cycles % CYCLES_PER_SECOND === 0;
+  const lines = [...(summary ? [
     { id: `in${sample.t}`, at: now, tag: 'вход', text: `положения ${sample.trains} поездов · событий диспетчера ${sample.incidents} · бригад на пределе ${sample.crewSoon}` },
     { id: `calc${sample.t}`, at: now, tag: 'расчёт', text: `профили и позиции ${sample.trains} · очередей ${sample.queue} · вариантов ${sample.variantsCount} · ${sample.ms.toFixed(1)} мс` },
     { id: `out${sample.t}`, at: now, tag: 'выход', text: `в пути ${sample.moving}, вынужденно стоят ${sample.forced}, средняя скорость ${sample.avgSpeed} км/ч · подсказок ${sample.recommendations}` },
+  ] : []),
     ...fresh.map(e => ({ id: `ev${e.id}`, at: e.at, tag: 'решение', text: e.text, kind: e.kind })),
   ];
   store.lines = clip([...store.lines, ...lines], 60);
@@ -56,7 +60,7 @@ export function useEngine(sim) {
     if (!sim || sim.error) return undefined;
     listeners.add(setState);
     runCycle(sim);
-    const id = setInterval(() => runCycle(sim), 1000);
+    const id = setInterval(() => runCycle(sim), 1000 / CYCLES_PER_SECOND);
     return () => { clearInterval(id); listeners.delete(setState); };
   }, [sim]);
   return state;
