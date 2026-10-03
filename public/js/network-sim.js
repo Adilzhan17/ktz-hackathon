@@ -159,11 +159,244 @@ function profileOf(service, uid, raw = false) {
 function stateAt(profile, e, L) {
   let prevT = 0, prevKm = 0;
   for (const leg of profile.legs) {
-    if (e < leg.t) return { km: prevKm + (leg.km - prevKm) * ((e - prevT) / (leg.t - prevT)), stopped: false, speed: profile.speed };
+    if (e < leg.t) return { km: prevKm + (leg.km - prevKm) * ((e - prevT) / (leg.t - prevT)), stopped: false, speed: Math.min(profile.speed, (leg.km - prevKm) / Math.max(1e-6, leg.t - prevT) * 60) };
     if (e <= leg.t + leg.dwell) return { km: leg.km, stopped: true, station: leg.name, reason: leg.reason, planned: leg.planned, speed: 0, restMin: leg.t + leg.dwell - e, waitedMin: e - leg.t };
     prevT = leg.t + leg.dwell; prevKm = leg.km;
   }
-  return { km: Math.min(L, prevKm + (L - prevKm) * ((e - prevT) / Math.max(1e-6, profile.total - prevT))), stopped: false, speed: profile.speed };
+  return { km: Math.min(L, prevKm + (L - prevKm) * ((e - prevT) / Math.max(1e-6, profile.total - prevT))), stopped: false, speed: Math.min(profile.speed, (L - prevKm) / Math.max(1e-6, profile.total - prevT) * 60) };
+}
+
+
+// ───────── Инциденты на маршрутах: закрытия путей, ограничения скорости, поломки ─────────
+// Список приходит с сервера. Эффект считается чистыми функциями: профиль рейса дополняется ожиданием перед
+// перегоном и медленным проездом, поэтому положение, события и прогноз прибытия согласованы.
+let incidentList = [], incidentRevision = 0, adjCache = new Map(), queueCache = new Map();
+export function setNetworkIncidents(list) { incidentList = Array.isArray(list) ? list : []; incidentRevision++; adjCache = new Map(); queueCache = new Map(); }
+export const networkIncidentRev = () => incidentRevision;
+export const networkIncidents = () => incidentList;
+export const WRONG_TRACK_KMH = 40;
+const HEAD_SAME = 5, HEAD_OPPOSITE = 3;
+export const isSingleTrack = route => route.weight <= 2;
+
+/** Зона инцидента в минутах модели и режим работы. */
+export function incidentZone(inc, route) {
+  const t0 = inc.from / 60000 + TZ, t1 = (inc.until ?? inc.from + 720 * 60000) / 60000 + TZ;
+  let mode, v = WRONG_TRACK_KMH;
+  if (inc.kind === 'restriction') { mode = 'slow'; v = inc.kmh; }
+  else if (inc.kind === 'closure') mode = inc.track === 'both' || isSingleTrack(route) ? 'closed' : 'lane';
+  else mode = { 1: 'owner', 2: 'follow', 3: 'lane', 4: 'closed' }[inc.level] || 'owner';
+  return { inc, a: Math.min(inc.a, inc.b), b: Math.max(inc.a, inc.b), t0, t1, mode, v };
+}
+const dirOfTrack = track => (track === 'odd' ? 'rev' : 'fwd'); // чётный путь — прямое направление
+// Линейная интерполяция времени по километру (с учётом стоянок).
+function timeAtKm(profile, L, km) {
+  let prevT = 0, prevKm = 0;
+  for (const leg of profile.legs) {
+    if (km <= leg.km) return prevT + (leg.t - prevT) * ((km - prevKm) / Math.max(1e-6, leg.km - prevKm));
+    prevT = leg.t + leg.dwell; prevKm = leg.km;
+  }
+  return prevT + (profile.total - prevT) * ((km - prevKm) / Math.max(1e-6, L - prevKm));
+}
+const travelEntry = (zone, dir, L) => (dir === 'fwd' ? zone.a : L - zone.b);
+const travelExit = (zone, dir, L) => (dir === 'fwd' ? zone.b : L - zone.a);
+const weightOf = cat => WEIGHT[cat];
+
+function participants(sim, zone, route, owner) {
+  const parts = [];
+  for (const s of sim.services) {
+    if (s.route.id !== route.id) continue;
+    if (zone.mode === 'follow' && s.dir !== owner?.dir) continue;
+    const entryKm = travelEntry(zone, s.dir, route.km), exitKm = travelExit(zone, s.dir, route.km);
+    const lo = Math.floor((zone.t0 - s.tMax - s.phase) / s.period), hi = Math.floor((zone.t1 + 600 - s.phase) / s.period);
+    for (let m = lo; m <= hi; m++) {
+      const uid = `${s.id}@${m}`;
+      if (owner && uid === owner.uid) continue;
+      const profile = profileOf(s, uid), dep = s.phase + m * s.period;
+      if (profile.total <= 0) continue;
+      const en = dep + timeAtKm(profile, route.km, entryKm);
+      if (en < zone.t0 || en > zone.t1 + 600) continue;
+      const len = exitKm - entryKm;
+      parts.push({ uid, dir: s.dir, cat: s.cat, en, trav: len / zone.v * 60, nominalTrav: len / Math.max(20, profile.speed) * 60, w: weightOf(s.cat), number: s.base + 2 * (((m % s.copies) + s.copies) % s.copies) });
+    }
+  }
+  return parts.sort((a, b) => a.en - b.en || a.uid.localeCompare(b.uid));
+}
+
+/** Очередь на единственный свободный путь: порядок проследования зависит от варианта. */
+function runQueue(parts, zone, variant) {
+  const out = new Map(), pending = [], lastByDir = {};
+  const openFrom = zone.mode === 'lane' ? zone.t0 : zone.t1;
+  let i = 0, last = null; // последний пропущенный: { dir, start, exit }
+  while (i < parts.length || pending.length) {
+    let tNow = Math.max(openFrom, last ? last.start + HEAD_SAME : openFrom);
+    if (!pending.length) tNow = Math.max(tNow, parts[i].en);
+    while (i < parts.length && parts[i].en <= tNow) pending.push(parts[i++]);
+    const bestOf = list => list.reduce((b, p) => (!b || p.w > b.w || (p.w === b.w && p.en < b.en) ? p : b), null);
+    let pick;
+    if (variant === 'fifo') pick = pending.reduce((b, p) => (!b || p.en < b.en ? p : b), null);
+    else if (variant === 'priority') pick = bestOf(pending);
+    else {
+      const same = last ? pending.filter(p => p.dir === last.dir) : [];
+      const top = bestOf(pending), topSame = bestOf(same);
+      pick = topSame && !(top.dir !== last.dir && top.w >= 10 && topSame.w < 10) ? topSame : top;
+    }
+    pending.splice(pending.indexOf(pick), 1);
+    let start = Math.max(pick.en, openFrom, (lastByDir[pick.dir] ?? -Infinity) + HEAD_SAME);
+    // пока путь закрыт, оба направления делят один свободный путь: проезд по одному
+    if (zone.mode === 'lane' && start < zone.t1 && last && last.dir !== pick.dir) start = Math.max(start, last.exit + HEAD_OPPOSITE);
+    const slow = zone.mode === 'lane' && start < zone.t1;
+    out.set(pick.uid, { start, en: pick.en, slow, trav: pick.trav, nominalTrav: pick.nominalTrav, w: pick.w, cat: pick.cat, dir: pick.dir, number: pick.number });
+    lastByDir[pick.dir] = start;
+    last = { dir: pick.dir, start, exit: start + (slow ? pick.trav : pick.nominalTrav) };
+  }
+  return out;
+}
+
+export const INCIDENT_VARIANTS = [
+  { id: 'fifo', name: 'По очереди подхода', description: 'Поезда проходят в порядке подхода к закрытому участку. Приоритеты не учитываются.' },
+  { id: 'priority', name: 'По приоритету', description: 'Пассажирские идут первыми, затем контейнерные, затем грузовые; грузовой ждёт, если приоритетный подойдёт к зоне.' },
+  { id: 'batch', name: 'Пакетами по направлениям', description: 'Поезда одного направления идут колонной, пока очередь не потребует переключить путь на пассажирский.' },
+];
+const variantOf = inc => (inc.approved && INCIDENT_VARIANTS.some(v => v.id === inc.variant) ? inc.variant : 'fifo');
+
+function ownerOf(sim, inc) {
+  if (inc.kind !== 'breakdown' || !inc.trainUid) return null;
+  const sep = inc.trainUid.lastIndexOf('@'), service = sim.services.find(s => s.id === inc.trainUid.slice(0, sep));
+  return service ? { uid: inc.trainUid, dir: service.dir, service } : null;
+}
+
+/** Результат очереди для зоны и варианта (кэшируется до изменения списка инцидентов). */
+function queueFor(sim, zone, route, variant) {
+  const key = `${zone.inc.id}|${variant}|${zone.mode}`;
+  if (queueCache.has(key)) return queueCache.get(key);
+  let result = null;
+  if (zone.mode === 'lane' || zone.mode === 'closed' || zone.mode === 'follow') {
+    const owner = ownerOf(sim, zone.inc);
+    result = runQueue(participants(sim, zone, route, owner), zone, variant);
+  }
+  queueCache.set(key, result);
+  return result;
+}
+
+/** Сравнение вариантов пропуска для инцидента: метрики по каждому и таблица поездов. */
+export function incidentVariants(sim, inc) {
+  const route = sim.byId.get(inc.routeId);
+  if (!route) return null;
+  const zone = incidentZone(inc, route);
+  const len = zone.b - zone.a;
+  const variants = INCIDENT_VARIANTS.map(v => {
+    const queue = queueFor(sim, zone, route, v.id);
+    const rows = [];
+    if (queue) for (const [uid, r] of queue) {
+      const extra = r.slow ? Math.max(0, r.trav - r.nominalTrav) : 0, delay = Math.max(0, r.start - r.en) + extra;
+      if (delay >= 1) rows.push({ uid, number: r.number, cat: r.cat, dir: r.dir, wait: Math.round(r.start - r.en), delay: Math.round(delay), weight: r.w, enterMs: Math.round((r.en - TZ) * 60000), releaseMs: Math.round((r.start - TZ) * 60000) });
+    }
+    const owner = ownerOf(sim, inc);
+    if (owner && zone.mode !== 'owner') rows.push({ uid: owner.uid, number: '—', cat: 'owner', dir: owner.dir, wait: Math.round(zone.t1 - zone.t0), delay: Math.round(zone.t1 - zone.t0), weight: 0, owner: true });
+    rows.sort((a, b) => b.delay * b.weight - a.delay * a.weight);
+    const m = { total: 0, weighted: 0, passenger: 0, delayed: rows.length, max: 0 };
+    for (const r of rows) { m.total += r.delay; m.weighted += r.delay * r.weight; if (r.cat === 'passenger') m.passenger += r.delay; m.max = Math.max(m.max, r.delay); }
+    return { ...v, metrics: m, rows };
+  });
+  const recommended = [...variants].sort((a, b) => a.metrics.weighted - b.metrics.weighted || a.metrics.passenger - b.metrics.passenger)[0];
+  for (const v of variants) v.recommended = v.id === recommended.id;
+  const applied = variantOf(inc);
+  return { zone, len, variants, recommendedId: recommended.id, appliedId: applied, mode: zone.mode };
+}
+
+/** Профиль рейса с учётом активных инцидентов маршрута. */
+function adjusted(sim, service, uid, dep, profile) {
+  const route = service.route;
+  const zones = [];
+  for (const inc of incidentList) {
+    if (inc.routeId !== route.id) continue;
+    const zone = incidentZone(inc, route);
+    if (zone.t1 + 600 < dep || zone.t0 > dep + profile.total + 600) continue;
+    zones.push(zone);
+  }
+  if (!zones.length) return profile;
+  const key = `${uid}`;
+  const hit = adjCache.get(key);
+  if (hit && hit.base === profile) return hit.profile;
+  const L = route.km;
+  const dir = service.dir;
+  const list = [];
+  for (const zone of zones) {
+    const owner = ownerOf(sim, zone.inc);
+    const entry = travelEntry(zone, dir, L), exit = travelExit(zone, dir, L), len = exit - entry;
+    const isOwner = owner?.uid === uid;
+    let release = null, speed = zone.v, slow = false;
+    if (isOwner) {
+      release = zone.t1; slow = false;
+      // собственная неисправность: поезд стоит в точке поломки
+      list.push({ zone, entry: Math.max(0, entry), exit: Math.max(0, entry) + 0.001, release, slow: false, len: 0.001, owner: true, speed });
+      continue;
+    }
+    if (zone.mode === 'slow') { slow = true; list.push({ zone, entry, exit, release: null, slow, len, speed }); continue; }
+    if (zone.mode === 'owner') continue;
+    const queue = queueFor(sim, zone, route, variantOf(zone.inc));
+    const r = queue?.get(uid);
+    if (!r) continue;
+    list.push({ zone, entry, exit, release: r.start, slow: r.slow, len, speed });
+  }
+  if (!list.length) { adjCache.set(key, { base: profile, profile }); return profile; }
+  list.sort((a, b) => a.entry - b.entry);
+  const nominal = profile.legs;
+  const legs = [];
+  let shift = 0, li = 0;
+  const pushLegsUpTo = km => { while (li < nominal.length && nominal[li].km <= km) { legs.push({ ...nominal[li], t: nominal[li].t + shift }); li++; } };
+  for (const z of list) {
+    pushLegsUpTo(z.entry);
+    const tEntry = dep + timeAtKm(profile, L, z.entry) + shift;
+    const wait = Math.max(0, (z.release ?? 0) - tEntry);
+    const base = timeAtKm(profile, L, z.exit) - timeAtKm(profile, L, z.entry);
+    const trav = z.slow ? Math.max(base, z.len / z.speed * 60) : base;
+    if (wait < 0.5 && trav - base < 0.5) continue;
+    const reasonWait = z.zone.inc.kind === 'breakdown' ? (z.owner ? `неисправность поезда, уровень ${z.zone.inc.level}` : `впереди поломка поезда №${z.zone.inc.trainNumber || '—'}: ожидание пропуска`)
+      : z.zone.mode === 'slow' ? 'ограничение скорости' : `закрыт перегон ${z.zone.inc.segName || ''}: ожидание пропуска`;
+    const tA = dep + timeAtKm(profile, L, z.entry) + shift - dep;
+    legs.push({ t: tA, km: z.entry, dwell: Math.max(0, wait), reason: wait >= 0.5 ? reasonWait : 'проезд с ограничением', planned: false, name: z.zone.inc.segName ? `перегон ${z.zone.inc.segName}` : 'перегон', crew: false, workedMin: 0, projectedMin: 0, nextStation: '', track: 1, pseudo: true, incidentId: z.zone.inc.id, wrongTrack: z.zone.mode === 'lane' });
+    // legs внутри зоны переносим пропорционально
+    let inside = 0;
+    while (li < nominal.length && nominal[li].km < z.exit) {
+      const f = (nominal[li].km - z.entry) / Math.max(1e-6, z.exit - z.entry);
+      legs.push({ ...nominal[li], t: tA + wait + trav * f + inside }); inside += nominal[li].dwell; li++;
+    }
+    if (z.exit > z.entry + 0.002) legs.push({ t: tA + wait + trav + inside, km: z.exit, dwell: 0, reason: 'выход из зоны', planned: true, name: 'выход из зоны', crew: false, workedMin: 0, projectedMin: 0, nextStation: '', track: 1, pseudo: true, silent: true });
+    shift += wait + (trav - base) + inside;
+  }
+  while (li < nominal.length) { legs.push({ ...nominal[li], t: nominal[li].t + shift }); li++; }
+  const out = { ...profile, legs, total: profile.total + shift };
+  adjCache.set(key, { base: profile, profile: out });
+  if (adjCache.size > 6000) adjCache.clear();
+  return out;
+}
+const hasIncidents = route => incidentList.some(i => i.routeId === route.id);
+const profileFor = (sim, s, uid, dep) => (hasIncidents(s.route) ? adjusted(sim, s, uid, dep, profileOf(s, uid)) : profileOf(s, uid));
+
+/** Линии движения маршрута для графика (ГИД): время × километр, с учётом инцидентов. */
+export function routeTimeline(sim, routeId, fromMs, toMs) {
+  const route = sim.byId.get(routeId), from = fromMs / 60000 + TZ, to = toMs / 60000 + TZ, out = [];
+  if (!route) return out;
+  const pad = incidentList.some(i => i.routeId === routeId) ? 900 : 0;
+  for (const s of sim.services) {
+    if (s.route.id !== routeId) continue;
+    const mFrom = Math.floor((from - s.tMax - pad - s.phase) / s.period), mTo = Math.floor((to - s.phase) / s.period);
+    for (let m = mFrom; m <= mTo; m++) {
+      const dep = s.phase + m * s.period, uid = `${s.id}@${m}`, profile = profileFor(sim, s, uid, dep);
+      if (dep + profile.total < from) continue;
+      const pts = [[dep, s.dir === 'fwd' ? 0 : route.km]];
+      let forced = [];
+      for (const leg of profile.legs) {
+        const km = s.dir === 'fwd' ? leg.km : route.km - leg.km;
+        pts.push([dep + leg.t, km]);
+        if (leg.dwell > 0.5) { pts.push([dep + leg.t + leg.dwell, km]); if (!leg.planned) forced.push([dep + leg.t, dep + leg.t + leg.dwell, km]); }
+      }
+      pts.push([dep + profile.total, s.dir === 'fwd' ? route.km : 0]);
+      out.push({ uid, number: s.base + 2 * (((m % s.copies) + s.copies) % s.copies), category: s.cat, dir: s.dir, points: pts.map(([t, km]) => [Math.round((t - TZ) * 60000), km]), forced: forced.map(([a, b, km]) => [Math.round((a - TZ) * 60000), Math.round((b - TZ) * 60000), km]) });
+    }
+  }
+  return out;
 }
 
 function locate(route, km) {
@@ -259,14 +492,15 @@ export function networkTrains(sim, nowMs, options = {}) {
 }
 
 function baseNetworkTrains(sim, nowMs, { exclude } = {}) {
+  sim = sim.services ? sim : sim;
   const t = nowMs / 60000 + TZ;
   const out = [];
   for (const s of sim.services) {
-    const mFrom = Math.floor((t - s.tMax - s.phase) / s.period), mTo = Math.floor((t - s.phase) / s.period);
+    const mFrom = Math.floor((t - s.tMax - (hasIncidents(s.route) ? 900 : 0) - s.phase) / s.period), mTo = Math.floor((t - s.phase) / s.period);
     for (let m = mFrom; m <= mTo; m++) {
       const dep = s.phase + m * s.period;
       const uid = `${s.id}@${m}`;
-      const profile = profileOf(s, uid);
+      const profile = profileFor(sim, s, uid, dep);
       const e = t - dep;
       if (e < 0 || e > profile.total) continue;
       const st = stateAt(profile, e, s.route.km);
@@ -298,11 +532,11 @@ export function networkItinerary(sim, train) {
   const sep = train.uid.lastIndexOf('@');
   const service = sim.services.find(s => s.id === train.uid.slice(0, sep));
   if (!service) return [];
-  const profile = profileOf(service, train.uid);
+  const profile = profileFor(sim, service, train.uid, service.phase + Number(train.uid.slice(sep + 1)) * service.period);
   if (train.departedMs === null) return [{ name: train.from, km: 0, arrival: train.scheduledDeparture, departure: null, reason: train.reason, planned: false }];
   return [
     { name: train.from, km: 0, arrival: train.waitingDeparture ? train.scheduledDeparture : train.departedMs, departure: train.departedMs, reason: train.waitingDeparture ? train.reason : 'отправление', planned: !train.waitingDeparture },
-    ...profile.legs.map(leg => ({ name: leg.name, km: leg.km, track: leg.track,
+    ...profile.legs.filter(leg => !leg.silent).map(leg => ({ name: leg.name, km: leg.km, track: leg.track,
       arrival: Math.round(train.departedMs + leg.t * 60000), departure: Math.round(train.departedMs + (leg.t + leg.dwell) * 60000),
       reason: leg.reason, planned: leg.planned, crew: Boolean(leg.crew) })),
     { name: train.to, km: train.totalKm, arrival: train.arrivesMs, departure: null, reason: 'прибытие на конечную', planned: true },
@@ -375,8 +609,8 @@ function baseNetworkEvents(sim, nowMs, windowMin = 360) {
   let windows = eventMemo.get(sim);
   if (!windows) { windows = new Map(); eventMemo.set(sim, windows); }
   let cached = windows.get(windowMin);
-  if (!cached || cached.slot !== slot) {
-    cached = { slot, list: buildNetworkEvents(sim, (slot + 1) * 60000, windowMin + 1) };
+  if (!cached || cached.slot !== slot || cached.rev !== incidentRevision) {
+    cached = { slot, rev: incidentRevision, list: buildNetworkEvents(sim, (slot + 1) * 60000, windowMin + 1) };
     if (windows.size >= 8) windows.delete(windows.keys().next().value);
     windows.set(windowMin, cached);
   }
@@ -390,13 +624,14 @@ function buildNetworkEvents(sim, nowMs, windowMin = 360) {
   const now = nowMs / 60000 + TZ, from = now - windowMin;
   const list = [];
   for (const s of sim.services) {
-    const mFrom = Math.floor((from - s.tMax - s.phase) / s.period), mTo = Math.floor((now - s.phase) / s.period);
+    const mFrom = Math.floor((from - s.tMax - (hasIncidents(s.route) ? 900 : 0) - s.phase) / s.period), mTo = Math.floor((now - s.phase) / s.period);
     const origin = s.dir === 'fwd' ? s.route.from : s.route.to, dest = s.dir === 'fwd' ? s.route.to : s.route.from;
     for (let m = mFrom; m <= mTo; m++) {
       const dep = s.phase + m * s.period;
       if (dep > now) continue;
-      const uid = `${s.id}@${m}`, profile = profileOf(s, uid);
+      const uid = `${s.id}@${m}`, profile = profileFor(sim, s, uid, dep);
       if (dep + profile.total < from) continue;
+      const realLegs = profile.legs.filter(l => !l.pseudo);
       const number = s.base + 2 * (((m % s.copies) + s.copies) % s.copies);
       const base = { uid, number, category: s.cat, label: CATEGORIES[s.cat].label, routeId: s.route.id, route: s.route.name };
       const hh = hash(uid);
@@ -418,7 +653,7 @@ function buildNetworkEvents(sim, nowMs, windowMin = 360) {
       const kindOf = reason => (/пропуск/.test(reason) ? 'yield' : /бригад/.test(reason) ? 'crew' : /неисправн/.test(reason) ? 'repair' : 'hold');
       push(0, 'send', origin, `Отправлен №${number} (${base.label.toLowerCase()}) со станции ${origin} в сторону ${dest}: путь свободен, маршрут задан`);
       s.stops.forEach((st, i) => {
-        const leg = profile.legs[i], track = `путь ${leg.track}`;
+        const leg = realLegs[i], track = `путь ${leg.track}`;
         if (leg.planned) {
           push(leg.t, 'accept', st.name, `Принят №${number} на станцию ${st.name}, ${track}: плановая стоянка ${leg.dwell} мин`, false, { dwell: leg.dwell });
           if (leg.crew) {
@@ -442,6 +677,13 @@ function buildNetworkEvents(sim, nowMs, windowMin = 360) {
           push(leg.t + leg.dwell, 'resolved', st.name, `Проблема решена на ${st.name}: ${done}. №${number} отправлен после ${leg.dwell} мин простоя`, false, { dwell: leg.dwell, cause: kind });
         }
       });
+      for (const leg of profile.legs) {
+        if (!leg.pseudo || leg.silent || leg.dwell < 0.5) continue;
+        const inc = incidentList.find(i => i.id === leg.incidentId);
+        const kind = inc?.kind === 'breakdown' ? 'repair' : 'hold';
+        push(leg.t, kind, leg.name, `№${number} (${base.label.toLowerCase()}) остановлен перед зоной: ${leg.reason}`, true, { dwell: Math.round(leg.dwell), incidentId: leg.incidentId });
+        push(leg.t + leg.dwell, 'resolved', leg.name, `Проблема решена: ограничение снято для №${number}, поезд продолжил движение после ${Math.round(leg.dwell)} мин ожидания`, false, { dwell: Math.round(leg.dwell), cause: kind, incidentId: leg.incidentId });
+      }
       push(profile.total, 'accept', dest, `Принят №${number} на станцию назначения ${dest} (${s.route.name}), разгрузка и расформирование`);
     }
   }

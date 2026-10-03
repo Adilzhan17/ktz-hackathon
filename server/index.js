@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { createState, snapshot, act, tick, advanceTime } from './model.js';
-import { prepare, networkTrains, networkDecisions, networkStats, networkItinerary, setNetworkPlan } from '../public/js/network-sim.js';
+import { prepare, networkTrains, networkDecisions, networkStats, networkItinerary, setNetworkPlan, setNetworkIncidents } from '../public/js/network-sim.js';
+import { NetIncidents } from './net-incidents.js';
 import { operationalMetrics, fleetStandingMetrics } from '../public/js/operational-metrics.js';
 import { NetworkArchive } from './network-archive.js';
 import { buildStationIndex, stationBoard } from '../public/js/network-detail-data.js';
@@ -62,6 +63,9 @@ catch (error) { console.error('Push недоступен, приложение �
 const routeData = JSON.parse(readFileSync(new URL('../public/data/kz-routes.json', import.meta.url), 'utf8'));
 const stationData = JSON.parse(readFileSync(new URL('../public/data/kz-stations.json', import.meta.url), 'utf8'));
 const network = prepare(routeData);
+const netIncidents = new NetIncidents(path.join(path.dirname(STATE_FILE), 'net-incidents.json'), network.byId, autoplay);
+setNetworkIncidents(netIncidents.list);
+const publishIncidents = () => { setNetworkIncidents(netIncidents.list); return { incidents: netIncidents.list, serverNow: state.now }; };
 let stationIndex;
 const SCHEDULE_FILE = path.join(path.dirname(STATE_FILE), 'network-schedule.json');
 let savedSchedule = { plan: null };
@@ -186,6 +190,24 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname.endsWith('/test')) return json(res, 200, await journalPush.test(input));
       if (url.pathname.endsWith('/unsubscribe')) journalPush.remove(input); else journalPush.add(input);
       return json(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/net/incidents') {
+      if (netIncidents.expire(state.now)) publishIncidents();
+      return json(res, 200, { incidents: netIncidents.list, serverNow: state.now });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/net/incidents') {
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 4096) return json(res, 413, { error: 'Слишком большой запрос' }); }
+      const input = JSON.parse(body);
+      try {
+        if (input.type === 'add') netIncidents.add(input.incident || {}, state.now);
+        else if (input.type === 'remove') { if (!netIncidents.remove(String(input.id))) throw new Error('Событие не найдено'); }
+        else if (input.type === 'approve') netIncidents.approve(String(input.id), String(input.variant), input.approved !== false);
+        else if (input.type === 'clear') netIncidents.clear(input.routeId ? String(input.routeId) : null);
+        else throw new Error('Неизвестная команда');
+      } catch (error) { return json(res, 400, { error: error.message }); }
+      return json(res, 200, publishIncidents());
     }
     if (req.method === 'GET' && url.pathname === '/api/schedule-events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });

@@ -8,16 +8,18 @@ import { TrackMap } from './trackmap.js';
 import { DispatcherPanel } from './panel.js';
 import { NetworkTrains, NetworkStations } from './network-lists.js';
 import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
-import { NetworkDispatcher } from './network-dispatcher.js';
-import { useSim } from './network-data.js';
+import { DispatcherPage } from './dispatch-panel.js';
 
 const stationName = (data, i) => data.stations[i].name;
 
+/** Диспетчерская панель: по умолчанию вся сеть по маршрутам, детальная модель участка — по ссылке ?route=corridor. */
 export function Overview({ data }) {
-  const sim = useSim();
-  const [routeId, setRouteId] = useState('corridor');
-  const routeSelect = html`<div class="panel panel-head"><label class="schedule-field"><span>Маршрут диспетчера</span><select aria-label="Маршрут диспетчера" value=${routeId} onChange=${e => setRouteId(e.target.value)}><option value="corridor">${data.stations[0].name} — ${data.stations.at(-1).name} · детальный участок</option>${(sim?.routes || []).map(r => html`<option key=${r.id} value=${r.id}>${r.name}</option>`)}</select></label></div>`;
-  if (routeId !== 'corridor') return html`<${PageHeader} title="Оперативная обстановка" subtitle="Движение и операции выбранного маршрута" />${routeSelect}<${NetworkDispatcher} key=${routeId} data=${data} routeId=${routeId} />`;
+  const routeId = app.route.params.route;
+  return routeId === 'corridor' ? html`<${CorridorOverview} data=${data} />` : html`<${DispatcherPage} data=${data} routeId=${routeId || 'AST-ALA'} />`;
+}
+
+function CorridorOverview({ data }) {
+  const routeSelect = html`<div class="panel panel-head"><div><strong>Детальная модель: ${data.stations[0].name} — ${data.stations.at(-1).name}</strong><small class="muted"> · полные варианты пропуска и подъездные пути</small></div><a class="btn btn-secondary" href=${href('/overview')}><${Icon} name="chart-gantt" size=${17} />Диспетчерская панель сети</a></div>`;
   const late = data.trains.filter(t => t.delay > 0);
   const passengerLate = data.trains.filter(t => t.category === 'passenger' && t.delay > 0);
   const worst = passengerLate.reduce((m, t) => Math.max(m, t.delay), 0);
@@ -76,7 +78,7 @@ export function DecisionsPage({ data }) {
       <div class="stack">
         ${incident ? html`<${IncidentPanel} data=${data} />` : html`<section class="panel"><${Empty} icon="circle-check" title="Конфликтов нет">Движение идёт по графику. Введите событие справа, и система рассчитает варианты пропуска.</${Empty}></section>`}
         <section class="panel" aria-labelledby="prev-title">
-          <div class="panel-head"><div><h2 id="prev-title">Прогноз для выбранного варианта</h2><small>Окно 4 часа вокруг закрытого перегона. Красный отрезок — ожидание на станции.</small></div><a href=${href('/overview')}>Открыть полный ГИД</a></div>
+          <div class="panel-head"><div><h2 id="prev-title">Прогноз для выбранного варианта</h2><small>Окно 4 часа вокруг закрытого перегона. Красный отрезок — ожидание на станции.</small></div><a href=${href('/overview?route=corridor')}>Открыть полный ГИД</a></div>
           <${Gantt} data=${data} zoom=${4} start=${start} compact />
         </section>
       </div>

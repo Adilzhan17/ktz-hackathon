@@ -16,7 +16,7 @@ export function QuickSearch({ data, open, onClose }) {
   const q = query.trim().toLocaleLowerCase('ru').replace(/^№\s*/, '');
   const trains = q ? data.trains.filter(t => `${t.number} ${t.label} ${data.stations[t.route[0][1]].name} ${data.stations[t.route.at(-1)[1]].name}`.toLocaleLowerCase('ru').includes(q)).slice(0, 6) : [];
   const stations = q ? data.stations.filter(s => `${s.id} ${s.name}`.toLocaleLowerCase('ru').includes(q)).slice(0, 6) : [];
-  const selectTrain = t => { updateUi({ category: 'all', selectedTrain: t.number, windowStart: Math.max(0, t.forecast[0][0] - 30) }); onClose(); go('/overview'); };
+  const selectTrain = t => { updateUi({ category: 'all', selectedTrain: t.number, windowStart: Math.max(0, t.forecast[0][0] - 30) }); onClose(); go('/overview?route=corridor'); };
   return html`<${Dialog} id="quick-search" open=${open} onClose=${onClose} title="Найти поезд или станцию">
     <label class="search quick-input"><${Icon} name="search" size=${18} /><span class="sr-only">Номер поезда или название станции</span><input ref=${input} type="search" placeholder="Например, 153 или Дария" value=${query} onInput=${e => setQuery(e.target.value)} /></label>
     <div class="quick-results">

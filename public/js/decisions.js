@@ -44,7 +44,7 @@ function Conflicts({ data }) {
       <${Icon} name=${open ? 'chevron-up' : 'chevron-down'} size=${15} class="chev" /></button>
     ${open && html`<ul>
       ${list.slice(0, 8).map((c, i) => html`<li key=${i}>
-        <button type="button" class="link" onClick=${() => { updateUi({ selectedTrain: c.a.priority <= c.b.priority ? c.a.train : c.b.train }); go('/overview'); }}>
+        <button type="button" class="link" onClick=${() => { updateUi({ selectedTrain: c.a.priority <= c.b.priority ? c.a.train : c.b.train }); go('/overview?route=corridor'); }}>
           <strong>№${c.a.train}</strong> (${c.a.label}) × <strong>№${c.b.train}</strong> (${c.b.label})</button>
         <small>оба на перегоне около ${clockAt(data, Math.max(c.a.enter, c.b.enter))}</small>
       </li>`)}

@@ -5,10 +5,12 @@ import { useNetwork } from './geo-network.js';
 import { prepare, networkTrains, networkStats, setNetworkPlan } from './network-sim.js';
 import { useLiveSchedule } from './schedule-live.js';
 import { buildStationIndex } from './network-detail-data.js';
+import { useIncidents } from './network-incidents.js';
 
 let simLoading;
 export function useSim() {
   const live = useLiveSchedule();
+  useIncidents();
   const [sim, setSim] = useState(null);
   useEffect(() => { simLoading ||= fetch('/data/kz-routes.json').then(r => r.json()).then(prepare); simLoading.then(setSim).catch(() => setSim({ error: true })); }, []);
   if (sim && !sim.error) setNetworkPlan(sim, live.plan);
@@ -19,7 +21,8 @@ export function useSim() {
 export function useNetworkTotals() {
   const sim = useSim();
   const now = useLiveNow(0.2);
-  return useMemo(() => (sim && !sim.error ? networkStats(networkTrains(sim, now)) : null), [sim, Math.floor(now / 5000)]);
+  const { rev } = useIncidents();
+  return useMemo(() => (sim && !sim.error ? networkStats(networkTrains(sim, now)) : null), [sim, Math.floor(now / 5000), rev]);
 }
 
 /** Все поезда сети; пересчитываются раз в refreshSec секунд. */
@@ -27,7 +30,8 @@ export function useNetworkTrains(refreshSec = 5) {
   const sim = useSim();
   const now = useLiveNow(1 / refreshSec);
   const slot = Math.floor(now / (refreshSec * 1000));
-  const trains = useMemo(() => (sim && !sim.error ? networkTrains(sim, now) : []), [sim, slot]);
+  const { rev } = useIncidents();
+  const trains = useMemo(() => (sim && !sim.error ? networkTrains(sim, now) : []), [sim, slot, rev]);
   return { sim, trains, now, loading: !sim, failed: Boolean(sim?.error) };
 }
 
