@@ -1,6 +1,6 @@
 // Адаптер подробной схемы диспетчера (TrackMap) для маршрутов всей сети.
 // Для национальных маршрутов нет сигналов и ёмкости путей, поэтому эти поля остаются неизвестными.
-import { routeStations } from './route-profile.js';
+import { routeStations, electrifiedRanges } from './route-profile.js';
 
 export function networkTrackData(base, route, trains, now, incidents = []) {
   const stops = routeStations(route).filter(s => !s.minor || s.end).map(s => [s.name, s.km]);
@@ -29,6 +29,8 @@ export function networkTrackData(base, route, trains, now, incidents = []) {
       }
     }
   }
-  return { ...base, network: true, now, stations, trains: mapped, groups: [], holds: [], restrictions, dispatch: { closures, conflicts: [] },
+  const ranges = electrifiedRanges(route);
+  const electrified = stops.slice(1).map((_, i) => { const mid = (stops[i][1] + stops[i + 1][1]) / 2; return ranges.some(([a, b]) => mid >= a && mid <= b); });
+  return { ...base, network: true, now, stations, electrified, route, trains: mapped, groups: [], holds: [], restrictions, dispatch: { closures, conflicts: [] },
     sections: stations.slice(1).map((_, i) => ({ trains: mapped.filter(t => !t.network.stopped && Math.floor(t.diagramPosition) === i).length, load: null })) };
 }
