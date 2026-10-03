@@ -3,16 +3,12 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { html, Icon, clockAt, time, dateLong, delayText, duration, PRIORITY, DIRECTION } from './lib.js';
 import { app, act, go, href, updateUi, useLiveNow, liveNow, clock } from './store.js';
 import { Button, Badge, Segmented } from './ui.js';
+import { MARGIN, STEP, H, HALF, CARGO_Y, Y_ODD, Y_EVEN, TRAIN_W, TRAIN_H, ARROW, WAGON_W, WAGON_PITCH, ROMAN, SIGNAL_ROW, TRACK_Y, stationX, hashStr, wagonCount, consistLength, stationSignalSlots } from './track-geometry.js';
+import { Signal } from './track-signals.js';
+import { signalModel } from './signal-model.js';
 
-// ---- геометрия схемы (условные единицы; SVG масштабируется) ----
-const MARGIN = 150, STEP = 300, H = 478, HALF = 42, CARGO_Y = 348;
-const Y_ODD = 188, Y_EVEN = 254;           // главные пути: сверху нечётный (←), снизу чётный (→)
-const TRAIN_W = 64, TRAIN_H = 22;
-const stationX = i => MARGIN + i * STEP;
 const SPEEDS = [{ value: 1, label: 'Реальное' }, { value: 60, label: '×60' }, { value: 180, label: '×180' }, { value: 600, label: '×600' }];
 const ZOOMS = [{ value: 'fit', label: 'Весь участок' }, { value: '1', label: 'Обычный' }, { value: '1.35', label: 'Крупно' }];
-const hashStr = str => { let h = 2166136261 >>> 0; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; };
-const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
 const FILL = { 1: 'var(--accent)', 2: '#2c5770', 3: '#667f90' };
 
 /** Где поезд в момент tMin (минуты от начала суток модели): ТО перед рейсом, в пути, стоит или прибыл. */
@@ -129,9 +125,10 @@ export function placeTrains(data, tMin) {
   for (const line of [Y_ODD, Y_EVEN]) {
     const lanes = [];
     for (const rec of out.filter(r => r.loc.kind === 'move' && r.y === line).sort((a, b) => a.x - b.x)) {
-      let k = lanes.findIndex(x => rec.x - x >= TRAIN_W + 8);
-      if (k < 0) { k = lanes.length; lanes.push(-Infinity); }
-      lanes[k] = rec.x;
+      const half = consistLength(rec.t) / 2;
+      let k = lanes.findIndex(l => rec.x - l.x >= l.half + half + 8);
+      if (k < 0) { k = lanes.length; lanes.push({ x: -Infinity, half: 0 }); }
+      lanes[k] = { x: rec.x, half };
       rec.lane = Math.min(k, 3);
       rec.y += (line === Y_ODD ? -1 : 1) * rec.lane * 26;
     }
@@ -157,17 +154,11 @@ function trainStatus(data, rec, tMin) {
 }
 
 const TL = { odd: '#c8554d', even: 'var(--accent)' };
-/** Светофор: опора, корпус и три линзы; горит одна. */
-function Signal({ x, y, aspect, label, poleTo }) {
-  const lamps = [['red', -9], ['yellow', 0], ['green', 9]];
-  return html`<g transform=${`translate(${x} ${y})`} class="m-tl"><title>${label}</title>
-    ${poleTo != null && html`<line x1="0" x2="0" y1="0" y2=${poleTo - y} class="m-pole"/>`}
-    <rect x="-7" y="-15" width="14" height="30" rx="7" class="m-sg-body"/>
-    ${lamps.map(([name, cy]) => html`<circle key=${name} cy=${cy} r="3.8" class=${`lamp ${aspect === name ? `on-${name}` : 'off'}`}/>`)}</g>`;
-}
-const ASPECT_TEXT = { red: 'красный: занято или закрыто', yellow: 'жёлтый: следующий блок занят', green: 'зелёный: свободно' };
-function Light({ x, y, red, label }) {
-  return html`<${Signal} x=${x} y=${y} aspect=${red ? 'red' : 'green'} label=${`${label}: ${red ? 'закрыт' : 'открыт'}`} />`;
+/** Станционные светофоры: у каждой границы свой ряд, как у перегонных. */
+function StationSignals({ i, lights }) {
+  const at = stationSignalSlots(i);
+  const one = (key, x, line, label) => lights[key] && html`<${Signal} key=${key} x=${x} y=${SIGNAL_ROW[line]} trackY=${TRACK_Y[line]} aspect=${lights[key]} label=${label} />`;
+  return html`<g>${one('eEntry', at.eEntry, 'e', 'Чётное: входной')}${one('eExit', at.eExit, 'e', 'Чётное: выходной')}${one('oEntry', at.oEntry, 'o', 'Нечётное: входной')}${one('oExit', at.oExit, 'o', 'Нечётное: выходной')}</g>`;
 }
 
 function Station({ s, i, last, tracks, selected, ready, enRoute, onPick, lights, present = [] }) {
@@ -206,9 +197,7 @@ function Station({ s, i, last, tracks, selected, ready, enRoute, onPick, lights,
       : html`<g class="m-loop">
           <path d=${`M${x0 + 6} ${Y_ODD} L${x0 + 22} ${Y_EVEN} M${x0 + 6} ${Y_EVEN} L${x0 + 22} ${Y_ODD} M${x1 - 6} ${Y_ODD} L${x1 - 22} ${Y_EVEN} M${x1 - 6} ${Y_EVEN} L${x1 - 22} ${Y_ODD}`} class="m-rail cross"/>
           ${arm(Y_ODD, -1)}${arm(Y_EVEN, 1)}</g>`}
-    ${!yard && lights && html`<g>
-      <${Light} x=${x0 - 9} y=${Y_EVEN + 14} red=${lights.eEntry} label="Чётное: входной" /><${Light} x=${x1 + 9} y=${Y_EVEN + 14} red=${lights.eExit} label="Чётное: выходной" />
-      <${Light} x=${x1 + 9} y=${Y_ODD - 14} red=${lights.oEntry} label="Нечётное: входной" /><${Light} x=${x0 - 9} y=${Y_ODD - 14} red=${lights.oExit} label="Нечётное: выходной" /></g>`}
+    ${lights && html`<${StationSignals} i=${i} lights=${lights} />`}
     ${s.network ? html`<g class="m-netinfo"><text x=${cx} y=${CARGO_Y - 18} text-anchor="middle" class="m-load-h">${Math.round(s.km)} км · ${yard ? (i === 0 ? 'начальная' : 'конечная') : 'промежуточная'}</text>
       ${(() => { const n = 4 + hashStr(s.name) % 6, byTrack = new Map(present.map((r, k) => [(r.t.network.track ? r.t.network.track - 1 : k) % n, r]));
         return html`${Array.from({ length: n }, (_, k) => { const r = byTrack.get(k); return html`<g key=${k} transform=${`translate(${cx - 48} ${CARGO_Y - 8 + k * 13})`}><title>${`Путь ${ROMAN[k]}${r ? `: №${r.t.number}` : ': свободен'}`}</title>
@@ -268,25 +257,9 @@ export function TrackMap({ data, selectedTrain, onTrain, onStation }) {
   const pickTrain = value => onTrain ? onTrain(value) : updateUi({ selectedTrain: value });
   const live = placeTrains(data, tMin);     // точные положения для кадра
   const closures = data.dispatch.closures;
-  const activeNow = closures.filter(c => tMin >= c.from);
 
-  // занятость блок-участков (по три на перегон, счёт с запада) → проходные и станционные светофоры
-  const occupied = blockOccupancy(live);
-  const occ = (line, sgm, b) => activeNow.some(c => c.segment === sgm && (c.track === 'both' || (c.track === 'odd') === (line === 'o')) && (c.track !== (line === 'o' ? 'even' : 'odd'))) || occupied.has(`${line}:${sgm}:${b}`);
-  const signals = [];
-  for (let sgm = 0; sgm < n - 1; sgm++) {
-    const xs = stationX(sgm) + HALF, L = STEP - 2 * HALF;
-    for (let b = 0; b < 3; b++) {
-      const eNext = b < 2 ? occ('e', sgm, b + 1) : sgm < n - 2 && occ('e', sgm + 1, 0), oNext = b > 0 ? occ('o', sgm, b - 1) : sgm > 0 && occ('o', sgm - 1, 2);
-      const er = occ('e', sgm, b), or = occ('o', sgm, b);
-      signals.push({ k: `e${sgm}${b}`, x: xs + (L * b) / 3 + 7, y: Y_EVEN + 12, red: er, yellow: !er && Boolean(eNext), line: 'чётный', dir: 1 });
-      signals.push({ k: `o${sgm}${b}`, x: xs + (L * (b + 1)) / 3 - 7, y: Y_ODD - 12, red: or, yellow: !or && Boolean(oNext), line: 'нечётный', dir: -1 });
-    }
-  }
-  const lightsOf = i => ({
-    eEntry: i > 0 && occ('e', i - 1, 2), eExit: i < n - 1 && occ('e', i, 0),
-    oEntry: i < n - 1 && occ('o', i, 2), oExit: i > 0 && occ('o', i - 1, 0),
-  });
+  // светофоры: аспекты автоблокировки по занятости блок-участков и закрытиям
+  const sig = signalModel({ n, closures, tMin, live });
   const stopped = live.filter(r => r.stopped);
   const serviced = live.filter(r => r.service);
   const broken = live.filter(r => r.broken);
@@ -344,7 +317,7 @@ export function TrackMap({ data, selectedTrain, onTrain, onStation }) {
         ${data.network && data.stations.slice(0, -1).map((a, k) => data.electrified?.[k] && html`<g key=${`w${k}`} class="m-wire"><title>Контактная сеть</title>
           <line x1=${stationX(k)} x2=${stationX(k + 1)} y1=${Y_ODD - 54} y2=${Y_ODD - 54}/>
           ${Array.from({ length: Math.floor(STEP / 30) + 1 }, (_, m) => html`<line key=${m} x1=${stationX(k) + m * 30} x2=${stationX(k) + m * 30} y1=${Y_ODD - 54} y2=${Y_ODD - 46} class="mast"/>`)}</g>`)}
-        ${data.network && data.stations.slice(0, -1).map((a, k) => html`<text key=${`km${k}`} x=${stationX(k) + STEP / 2} y=${Y_EVEN + 30} text-anchor="middle" class="m-kmpost">${Math.round((a.km + data.stations[k + 1].km) / 2)} км</text>`)}
+        ${data.network && data.stations.slice(0, -1).map((a, k) => html`<text key=${`km${k}`} x=${stationX(k) + STEP / 2} y=${Y_EVEN + 72} text-anchor="middle" class="m-kmpost">${Math.round((a.km + data.stations[k + 1].km) / 2)} км</text>`)}
         ${data.stations.slice(0, -1).map((a, k) => { const xa = stationX(k) + HALF, xb = stationX(k + 1) - HALF, xm = (xa + xb) / 2; const load = data.sections[k]; return html`<g key=${k} class="m-section">
           <path d=${`M${xa} 98 H${xb} M${xa + 5} 94 L${xa} 98 L${xa + 5} 102 M${xb - 5} 94 L${xb} 98 L${xb - 5} 102`} class="m-bracket"/>
           <text x=${xm} y="90" text-anchor="middle" class="m-sect-t">${a.id}–${data.stations[k + 1].id}${data.network ? ` · ${Math.round(data.stations[k + 1].km - a.km)} км` : ''}</text>
@@ -354,7 +327,7 @@ export function TrackMap({ data, selectedTrain, onTrain, onStation }) {
             <text x=${xm} y="128" text-anchor="middle" class="m-load-t">${data.network ? `${load.trains} поезд.` : `${load.load}%`}</text></g>
           ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f + 4} ${Y_ODD - 5} L${xa + (xb - xa) * f - 4} ${Y_ODD} L${xa + (xb - xa) * f + 4} ${Y_ODD + 5}`} class="m-chev odd"/>`)}
           ${[0.28, 0.5, 0.72].map(f => html`<path key=${f} d=${`M${xa + (xb - xa) * f - 4} ${Y_EVEN - 5} L${xa + (xb - xa) * f + 4} ${Y_EVEN} L${xa + (xb - xa) * f - 4} ${Y_EVEN + 5}`} class="m-chev even"/>`)}</g>`; })}
-        ${data.stations.map((s, i) => html`<${Station} key=${s.id} s=${s} i=${i} last=${n - 1} tracks=${s.tracks} lights=${lightsOf(i)} present=${live.filter(r => r.stopped !== undefined && r.loc.kind === 'wait' && Number.isInteger(r.loc.idx) && r.loc.idx === i)} selected=${!data.network && app.ui.selectedStation === s.id}
+        ${data.stations.map((s, i) => html`<${Station} key=${s.id} s=${s} i=${i} last=${n - 1} tracks=${s.tracks} lights=${sig.station(i)} present=${live.filter(r => r.stopped !== undefined && r.loc.kind === 'wait' && Number.isInteger(r.loc.idx) && r.loc.idx === i)} selected=${!data.network && app.ui.selectedStation === s.id}
           ready=${stationTraffic(data, s.id, now).waiting}
           enRoute=${stationTraffic(data, s.id, now).enRoute}
           onPick=${() => onStation ? onStation(s.name) : updateUi({ selectedStation: app.ui.selectedStation === s.id ? null : s.id })} />`)}
@@ -368,9 +341,7 @@ export function TrackMap({ data, selectedTrain, onTrain, onStation }) {
         })}
         ${data.restrictions.filter(r => (r.from == null || tMin >= r.from) && (r.until == null || tMin < r.until)).map(r => html`<g key=${r.segment} transform=${`translate(${stationX(r.segment) + STEP / 2} ${Y_EVEN + 42})`}>
           <circle r="16" class="m-sign"/><text y="5" text-anchor="middle" class="m-sign-t">${r.kmh}</text></g>`)}
-        ${signals.map(s => data.network
-          ? html`<${Signal} key=${s.k} x=${s.x} y=${s.dir > 0 ? Y_EVEN + 34 : Y_ODD - 34} poleTo=${s.dir > 0 ? Y_EVEN + 5 : Y_ODD - 5} aspect=${s.red ? 'red' : s.yellow ? 'yellow' : 'green'} label=${`Блок-сигнал, ${s.line} путь, ${ASPECT_TEXT[s.red ? 'red' : s.yellow ? 'yellow' : 'green']}`} />`
-          : html`<circle key=${s.k} cx=${s.x} cy=${s.y} r="5" class=${`m-sig ${s.red ? 'red' : ''}`}/>`)}
+        ${sig.blocks.map(b => html`<${Signal} ...${b} />`)}
         ${live.map(rec => {
           const { t } = rec;
           const isSel = selected === t.number;
@@ -384,7 +355,7 @@ export function TrackMap({ data, selectedTrain, onTrain, onStation }) {
             onPointerMove=${e => enter(e, rec)} onPointerEnter=${e => enter(e, rec)}>
             <rect x="-40" y="-17" width="80" height="34" fill="transparent" class="m-hit"/>
             ${rec.stopped && html`<circle r="30" class="m-pulse"/>`}
-            ${t.network && Array.from({ length: Math.min(9, Math.max(2, Math.round(t.wagons / 7))) }, (_, w) => html`<rect key=${w} x=${goingLeft ? TRAIN_W / 2 + 4 + w * 15 : -TRAIN_W / 2 - 17 - w * 15} y="-7" width="12" height="14" rx="2.5" fill=${FILL[t.priority]} class="m-wagon"/>`)}
+            ${t.network && Array.from({ length: wagonCount(t) }, (_, w) => html`<rect key=${w} x=${goingLeft ? TRAIN_W / 2 + 6 + w * WAGON_PITCH : -TRAIN_W / 2 - 6 - WAGON_W - w * WAGON_PITCH} y="-7" width=${WAGON_W} height="14" rx="2.5" fill=${FILL[t.priority]} class="m-wagon"/>`)}
             <rect x=${-TRAIN_W / 2} y=${-TRAIN_H / 2} width=${TRAIN_W} height=${TRAIN_H} rx="6" fill=${FILL[t.priority]} class="m-body"/>
             <path d=${goingLeft ? `M${-TRAIN_W / 2} -11 L${-TRAIN_W / 2 - 12} 0 L${-TRAIN_W / 2} 11 Z` : `M${TRAIN_W / 2} -11 L${TRAIN_W / 2 + 12} 0 L${TRAIN_W / 2} 11 Z`} fill=${FILL[t.priority]}/>
             <text y="5" text-anchor="middle" class="m-num">${t.number}</text>
