@@ -65,3 +65,22 @@ export const LINKS = [
   ['profile', 'conflicts'], ['profile', 'queue'], ['blocks', 'conflicts'], ['limits', 'conflicts'], ['limits', 'variants'], ['journal', 'verdicts'], ['stats', 'verdicts'],
   ['conflicts', 'decisions'], ['conflicts', 'notify'], ['conflicts', 'advice'], ['verdicts', 'advice'], ['verdicts', 'shorten'], ['weight', 'advice'], ['variants', 'eta'], ['queue', 'eta'], ['conflicts', 'eta'], ['stats', 'positions'], ['profile', 'eta'],
 ];
+
+/**
+ * Записей в секунду, которые узел отдаёт дальше. Одна точка на графе — одна запись:
+ * по поезду на каждый рейс, по событию на каждое решение, по расчёту на каждый вариант.
+ */
+export const FLOW = {
+  trains: s => s.trains, timetable: s => s.trains, incidents: s => s.incidents * 4, crews: s => s.trains, fleet: s => s.trains, wagons: s => s.trains, clock: () => 4,
+  profile: s => s.trains, journal: s => Math.max(0.3, s.eventsHour / 3600), stats: s => s.trains, blocks: s => s.moving, limits: s => s.trains,
+  queue: s => s.queue * 4, variants: s => s.variantsCount * 4, weight: s => s.variantsCount * 4, conflicts: s => s.forced * 4, verdicts: s => s.recommendations * 4,
+  positions: s => s.moving, eta: s => s.trains, decisions: s => Math.max(0.3, s.eventsHour / 3600), notify: s => s.passengerForced * 4, advice: s => s.recommendations * 4, shorten: s => s.shorten * 4,
+};
+
+/** Скорость по каждой связи: поток узла делится поровну между его исходящими связями. */
+export function linkRates(sample) {
+  const out = new Map(), degree = new Map();
+  for (const [a] of LINKS) degree.set(a, (degree.get(a) || 0) + 1);
+  for (const [a, b] of LINKS) out.set(`${a}>${b}`, (FLOW[a]?.(sample) ?? 0) / degree.get(a));
+  return out;
+}
