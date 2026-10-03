@@ -2,6 +2,18 @@ import webpush from 'web-push';
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
+import { networkEvents } from '../public/js/network-sim.js';
+
+// The append-only archive can be ahead of model time after a reset/rewind.
+// Notify events crossed by the current clock, not only never-before archived IDs.
+export class LivePushCursor {
+  constructor(now) { this.through = now; }
+  advance(sim, now) {
+    const from = this.through; this.through = now;
+    if (now <= from) return [];
+    return networkEvents(sim, now, (now - from) / 60000).filter(e => e.at > from && e.at <= now);
+  }
+}
 
 export function validateSubscription(sub) {
   const url = new URL(sub?.endpoint);

@@ -1,9 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createECDH, randomBytes } from 'node:crypto';
-import { JournalPush, validateSubscription } from '../server/push.js';
+import { JournalPush, validateSubscription, LivePushCursor } from '../server/push.js';
+import { prepare, networkEvents } from '../public/js/network-sim.js';
+import { readFileSync } from 'node:fs';
 const ec = createECDH('prime256v1'); ec.generateKeys();
 const sub = { endpoint: 'https://web.push.apple.com/test', keys: { auth: randomBytes(16).toString('base64url'), p256dh: ec.getPublicKey().toString('base64url') } };
+test('live push resumes after clock rewind even when archive has already seen that period', () => {
+  const sim=prepare(JSON.parse(readFileSync(new URL('../public/data/kz-routes.json',import.meta.url))));
+  const now=Date.parse('2026-10-03T04:00:00Z'), cursor=new LivePushCursor(now);
+  const events=cursor.advance(sim,now+60000);
+  assert.deepEqual(events,networkEvents(sim,now+60000,1).filter(e=>e.at>now));
+  assert.deepEqual(cursor.advance(sim,now+60000),[]);
+  assert.deepEqual(cursor.advance(sim,now),[]);
+  assert.deepEqual(cursor.advance(sim,now+60000),events);
+  assert.ok(events.length>0);
+});
 test('push rejects arbitrary destinations and invalid subscription keys', () => {
   assert.throws(() => validateSubscription({ ...sub, endpoint: 'https://127.0.0.1/admin' }));
   assert.throws(() => validateSubscription({ ...sub, endpoint: 'https://web.push.apple.com.attacker.test/a' }));

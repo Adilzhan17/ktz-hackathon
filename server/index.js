@@ -12,7 +12,7 @@ import { buildStationIndex, stationBoard } from '../public/js/network-detail-dat
 import { buildSchedule, scheduleEconomics } from '../public/js/schedule-engine.js';
 import { replanLocally, extendSchedule, SERVICE_TYPES } from '../public/js/schedule-disruptions.js';
 import { ECONOMIC_REFERENCE } from '../public/js/economic-reference.js';
-import { JournalPush } from './push.js';
+import { JournalPush, LivePushCursor } from './push.js';
 import { Telemetry } from './telemetry.js';
 const telemetry = new Telemetry();
 
@@ -108,11 +108,11 @@ let archive;
 try { archive = new NetworkArchive({ sim: network, now: state.now, file: autoplay ? path.join(path.dirname(STATE_FILE), 'network-events.jsonl') : null, onWrite: (bytes, records) => telemetry.write('Журнал', bytes, records) }); }
 catch (error) { console.error('Архив сети недоступен (движение продолжено, файл сохранён):', error); }
 const networkClients = new Set();
+const livePush = new LivePushCursor(state.now);
 function archiveTick() {
+  journalPush?.enqueue(livePush.advance(network, state.now));
   if (!archive) return;
-  const through = archive.through;
   const events = archive.advance(state.now);
-  journalPush?.enqueue(events.filter(e => e.at > through));
   for (const e of events) if (e.kind === 'repair' && e.dwell > 0 && e.at + e.dwell * 60000 > state.now) {
     const locoId = e.locoId || `active:${e.uid}`;
     if (savedSchedule.plan.fleet.some(l => l.id === locoId)) applyScheduleIncident({ id: e.id, locoId, from: e.at, until: e.at + e.dwell * 60000, reason: `Неисправность №${e.number}: ${e.station}` });
