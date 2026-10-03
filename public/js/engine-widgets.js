@@ -1,9 +1,7 @@
-// Визуализации страницы «Модель»: нейросетевой граф, ленты потока, спарклайны, тепловая карта, характеристики.
+// Виджеты страницы «Модель»: спарклайн, карточка метрики, столбцы, тепловая карта, характеристики.
 import { useMemo } from 'preact/hooks';
-import { html, time } from './lib.js';
-import { Badge } from './ui.js';
+import { html } from './lib.js';
 import { scheduledTrips, MODEL_PARAMS } from './network-sim.js';
-import { DECISION } from './log.js';
 
 export const fmt = n => (typeof n === 'number' ? Math.round(n).toLocaleString('ru-RU') : n);
 
@@ -18,13 +16,18 @@ export function Sparkline({ values, width = 160, height = 38, label, color = 'va
     <circle cx=${pts.at(-1)[0]} cy=${pts.at(-1)[1]} r="3" fill=${color}/></svg>`;
 }
 
-const TAG_TONE = { вход: 'neutral', расчёт: 'accent', выход: 'ink', решение: 'muted' };
-/** Лента потока данных: что пришло, что посчитано, что получилось. */
-export function StreamFeed({ lines }) {
-  return html`<ol class="stream" aria-live="off">${[...lines].reverse().slice(0, 18).map(l => html`<li key=${l.id} class=${`stream-line ${l.tag}`}>
-    <time>${new Date(l.at).toLocaleTimeString('ru-RU', { timeZone: 'Asia/Almaty', hour12: false })}</time>
-    ${l.kind ? html`<${Badge} tone=${DECISION[l.kind].tone} icon=${DECISION[l.kind].icon}>${DECISION[l.kind].label}</${Badge}>` : html`<${Badge} tone=${TAG_TONE[l.tag]}>${l.tag}</${Badge}>`}
-    <span>${l.text}</span></li>`)}</ol>`;
+/** Карточка метрики: название, значение, график за последнюю минуту и, при необходимости, перцентили. */
+export function MetricCard({ label, unit, value, values, extra }) {
+  return html`<article class="metric-card"><span class="metric-name">${label}</span>
+    <strong class="num">${value}${unit ? html`<small> ${unit}</small>` : ''}</strong>
+    <${Sparkline} values=${values} width=${200} height=${36} label=${`Динамика: ${label}`} />${extra && html`<small class="metric-extra">${extra}</small>`}</article>`;
+}
+
+/** Горизонтальные столбцы: сравнение долей. */
+export function Bars({ rows }) {
+  const max = Math.max(1, ...rows.map(r => r.value));
+  return html`<div class="bars">${rows.map(r => html`<div class="bars-row" key=${r.label}><span>${r.label}</span>
+    <span class="bars-track"><i class=${`bars-fill ${r.tone || ''}`} style=${`width:${Math.max(2, r.value / max * 100)}%`}></i></span><strong class="num">${fmt(r.value)}</strong></div>`)}</div>`;
 }
 
 /** Тепловая карта: отправления по маршрутам на ближайшие 24 часа (из расписания модели). */

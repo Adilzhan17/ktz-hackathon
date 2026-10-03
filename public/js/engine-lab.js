@@ -1,65 +1,74 @@
-// Страница «Модель»: как работает расчёт прямо сейчас — данные, вычисления, результат и характеристики.
+// Страница «Модель»: конвейер расчёта, что приходит и что получается, лента событий, метрики и характеристики.
 import { useMemo, useState } from 'preact/hooks';
-import { html, Icon, time } from './lib.js';
-import { Badge, Kpi, PageHeader, Empty } from './ui.js';
+import { html, time } from './lib.js';
+import { Badge, Empty, Kpi, PageHeader } from './ui.js';
 import { useSim } from './network-data.js';
 import { useNetwork } from './geo-network.js';
-import { NODES } from './engine-graph.js';
-import { useEngine, HISTORY, CYCLES_PER_SECOND } from './engine-metrics.js';
-import { CoreView } from './engine-core-view.js';
-import { StreamFeed, Sparkline, Heatmap, Characteristics, fmt } from './engine-views.js';
 import { DECISION } from './log.js';
+import { STAGES, METRIC_CARDS } from './engine-graph.js';
+import { useEngine, HISTORY, CYCLES_PER_SECOND, percentile } from './engine-metrics.js';
+import { PipelineStrip, StageCard } from './engine-pipeline.js';
+import { EventTape } from './engine-tape.js';
+import { MetricCard, Bars, Heatmap, Characteristics, fmt } from './engine-widgets.js';
 
 const KINDS = ['send', 'accept', 'crew', 'yield', 'hold', 'repair', 'resolved'];
-
-function Bars({ rows, unit = '' }) {
-  const max = Math.max(1, ...rows.map(r => r.value));
-  return html`<div class="hist">${rows.map(r => html`<div class="hist-row" key=${r.label}><span>${r.label}</span><span class="hist-bar"><i class=${`cost-bar ${r.tone === 'danger' ? 'bar-danger' : ''}`} style=${`width:${Math.max(2, r.value / max * 100)}%`}></i></span><strong class="num">${fmt(r.value)}${unit}</strong></div>`)}</div>`;
-}
+const Panel = ({ id, title, hint, actions, children, class: cls = '' }) => html`<section class=${`panel ${cls}`} aria-labelledby=${id}>
+  <div class="panel-head"><div><h2 id=${id}>${title}</h2>${hint && html`<small>${hint}</small>`}</div>${actions}</div>${children}</section>`;
 
 export function EnginePage() {
   const sim = useSim();
   const net = useNetwork();
   const { sample, samples, lines, counters, startedAt } = useEngine(sim);
-  const [selected, setSelected] = useState(null);
+  const [open, setOpen] = useState(null);
+  const window = Math.round(Math.min(HISTORY, samples.length) / CYCLES_PER_SECOND);
+  const stats = useMemo(() => {
+    const ms = samples.map(s => s.ms);
+    return { p50: percentile(ms, 0.5), p95: percentile(ms, 0.95), max: ms.length ? Math.max(...ms) : 0 };
+  }, [samples]);
   if (!sim) return html`<${PageHeader} title="Модель" subtitle="Загрузка маршрутов…" />`;
   if (sim.error) return html`<${PageHeader} title="Модель" /><${Empty} icon="circle-alert" title="Не удалось загрузить маршруты">Обновите страницу.</${Empty}>`;
   if (!sample) return html`<${PageHeader} title="Модель" subtitle="Первый цикл расчёта…" />`;
   const ctx = { dailyTrips: sim.services.reduce((n, s) => n + s.n, 0), clock: time(sample.now) };
   const series = key => samples.map(s => s[key]);
-  const node = NODES.find(n => n.id === selected);
-  const kindRows = KINDS.map(k => ({ label: DECISION[k].label, value: sample.byKind[k] || 0, tone: ['hold', 'repair'].includes(k) ? 'danger' : undefined }));
   const throughput = sample.ms > 0 ? Math.round(sample.trains / (sample.ms / 1000)) : 0;
-  return html`<${PageHeader} title="Модель" subtitle="Как работает расчёт прямо сейчас: какие данные приходят, что считается и что получается. Расчёт идёт непрерывно, 4 цикла в секунду"
+  const problem = (sample.byKind.hold || 0) + (sample.byKind.repair || 0) + (sample.byKind.yield || 0);
+  const kindRows = KINDS.map(k => ({ label: DECISION[k].label, value: sample.byKind[k] || 0, tone: ['hold', 'repair'].includes(k) ? 'danger' : '' }));
+  return html`<${PageHeader} title="Модель" subtitle="Что модель получает, что считает и что выдаёт — прямо сейчас. Расчёт идёт непрерывно, 4 цикла в секунду"
       actions=${html`<${Badge} tone="accent" icon="radio">цикл ${fmt(counters.cycles)} · ${time(sample.now)}</${Badge}>`} />
     <section class="kpis" aria-label="Работа модели">
-      <${Kpi} label="Цикл расчёта" icon="cpu" value=${sample.ms.toFixed(1)} unit=" мс" note=${`поезда ${sample.trainsMs.toFixed(1)} · события ${sample.eventsMs.toFixed(1)} · варианты ${sample.variantsMs.toFixed(1)}`} />
+      <${Kpi} label="Цикл расчёта" icon="cpu" value=${sample.ms.toFixed(1)} unit=" мс" note=${`p95 ${stats.p95.toFixed(1)} мс · максимум ${stats.max.toFixed(1)} мс`} />
       <${Kpi} label="Производительность" icon="activity" value=${fmt(throughput)} unit=" поездов/с" note=${`${fmt(sample.trains)} поездов за цикл`} />
-      <${Kpi} label="Решений за час" icon="list-checks" value=${fmt(sample.eventsHour)} note=${`вынужденных ${(sample.byKind.hold || 0) + (sample.byKind.repair || 0) + (sample.byKind.yield || 0)}`} />
-      <${Kpi} label="Подсказок диспетчеру" icon="lightbulb" value=${sample.recommendations} note="разбор вынужденных стоянок" />
+      <${Kpi} label="Решений за час" icon="list-checks" value=${fmt(sample.eventsHour)} note=${`с задержками и неисправностями: ${problem}`} />
+      <${Kpi} label="Подсказок диспетчеру" icon="lightbulb" value=${sample.recommendations} note=${`оправдано ${sample.justified}, можно сократить ${sample.shorten}`} />
       <${Kpi} label="События на линии" icon="siren" tone=${sample.incidents ? 'danger' : 'neutral'} value=${sample.incidents} note=${sample.incidents ? `вариантов пропуска: ${sample.variantsCount}` : 'движение по графику'} />
-      <${Kpi} label="Память страницы" icon="database" value=${sample.heapMb ?? '—'} unit=${sample.heapMb ? ' МБ' : ''} note=${sample.heapMb ? 'JS-куча браузера' : 'браузер не сообщает'} />
+      <${Kpi} label="Изменений на входе" icon="radio" value=${fmt(counters.inputs)} note="за сеанс: новые рейсы, остановки, бригады, события" />
     </section>
-    <section class="panel" aria-labelledby="nn-h"><div class="panel-head"><div><h2 id="nn-h">Ядро модели в работе</h2><small>Блоки данных летят к ядру, внутри идёт расчёт, результат разлетается по выходам. Каждая пачка — настоящий цикл расчёта (4 раза в секунду) или настоящее решение из журнала. Нажмите на узел, чтобы увидеть, что он считает.</small></div></div>
-      <${CoreView} sample=${sample} ctx=${ctx} selected=${selected} onSelect=${setSelected} cycle=${counters.cycles} />
-      ${node ? html`<div class="nn-detail"><div><strong>${node.label}</strong><p>${node.hint}</p><code>${node.formula}</code></div>
-        <div class="nn-spark"><b class="num">${node.id === 'clock' ? ctx.clock : `${fmt(node.value(sample, ctx))} ${node.unit}`}</b><${Sparkline} values=${samples.map(s => node.value(s, ctx)).filter(v => typeof v === 'number')} width=${220} height=${44} label=${`Динамика: ${node.label}`} /><small>последние ${Math.round(Math.min(HISTORY, samples.length) / CYCLES_PER_SECOND)} с</small></div></div>`
-        : html`<p class="muted pad"><${Icon} name="mouse-pointer-click" size=${15} class="inline" /> Выберите узел, чтобы увидеть, что он считает и по какой формуле.</p>`}
-    </section>
-    <div class="engine-two">
-      <section class="panel" aria-labelledby="st-h"><div class="panel-head"><div><h2 id="st-h">Поток данных</h2><small>Вход → расчёт → выход и новые решения по мере появления</small></div></div><${StreamFeed} lines=${lines} /></section>
-      <section class="panel" aria-labelledby="mt-h"><div class="panel-head"><div><h2 id="mt-h">Метрики в реальном времени</h2><small>Последние ${Math.round(Math.min(HISTORY, samples.length) / CYCLES_PER_SECOND)} секунд</small></div></div>
-        <div class="spark-grid">
-          ${[['Время цикла, мс', 'ms', 1], ['Поездов на линии', 'trains', 0], ['Вынужденные стоянки', 'forced', 0], ['Средняя скорость, км/ч', 'avgSpeed', 0], ['Решений за час', 'eventsHour', 0], ['Бригад на пределе', 'crewSoon', 0]].map(([label, key, d]) => html`<div key=${key} class="spark-card"><span>${label}</span><strong class="num">${d ? sample[key].toFixed(d) : fmt(sample[key])}</strong><${Sparkline} values=${series(key)} width=${190} height=${40} label=${label} /></div>`)}
-        </div></section>
+    <${Panel} id="pl-h" title="Конвейер расчёта" hint="Этапы — станции, пачки данных — мини-поезда. Светофор показывает нагрузку этапа: зелёный до 30 мс, жёлтый до 80 мс, красный выше." class="engine-block">
+      <${PipelineStrip} sample=${sample} cycle=${counters.cycles} />
+      <ul class="pipeline-legend" aria-label="Условные обозначения">
+        <li><i class="lg-pk data"></i>Положения поездов</li><li><i class="lg-pk plan"></i>Очереди и конфликты</li><li><i class="lg-pk mute"></i>Подсказки диспетчеру</li><li><i class="lg-pk danger"></i>События диспетчера</li><li><i class="lg-pk small"></i>Изменения на входе</li>
+      </ul>
+    </${Panel}>
+    <div class="engine-grid">
+      <div class="stage-grid">${STAGES.map((st, i) => html`<${StageCard} key=${st.id} stage=${st} index=${i} sample=${sample} ctx=${ctx} samples=${samples} openId=${open} onToggle=${setOpen} />`)}</div>
+      <aside class="engine-side"><${Panel} id="tp-h" title="События модели" hint="Что получает, что считает и какие решения принимает" class="tape-panel">
+        <${EventTape} lines=${lines} />
+      </${Panel}></aside>
     </div>
+    <${Panel} id="mt-h" title="Метрики в реальном времени" hint=${`Последние ${window} секунд, 4 измерения в секунду`}>
+      <div class="metric-grid">${METRIC_CARDS.map(c => html`<${MetricCard} key=${c.key} label=${c.label} unit=${c.unit} value=${c.digits ? sample[c.key].toFixed(c.digits) : fmt(sample[c.key])} values=${series(c.key)}
+        extra=${c.key === 'ms' ? `p50 ${stats.p50.toFixed(1)} · p95 ${stats.p95.toFixed(1)} мс` : null} />`)}</div>
+    </${Panel}>
     <div class="engine-two">
-      <section class="panel" aria-labelledby="rs-h"><div class="panel-head"><div><h2 id="rs-h">Что получается</h2><small>Результат последнего цикла</small></div></div>
-        <h3>Решения за час по типам</h3><${Bars} rows=${kindRows} />
+      <${Panel} id="rs-h" title="Что получается" hint="Результат последнего цикла">
+        <h3>Решения за час</h3><${Bars} rows=${kindRows} />
         <h3>Поезда по категориям</h3><${Bars} rows=${[{ label: 'Пассажирские', value: sample.passenger }, { label: 'Контейнерные', value: sample.container }, { label: 'Грузовые', value: sample.freight }]} />
-        <h3>Состояние</h3><${Bars} rows=${[{ label: 'В пути', value: sample.moving }, { label: 'Плановая стоянка', value: sample.stopped - sample.forced }, { label: 'Вынужденная стоянка', value: sample.forced, tone: 'danger' }]} /></section>
-      <section class="panel" aria-labelledby="hm-h"><div class="panel-head"><div><h2 id="hm-h">Нагрузка на ближайшие 24 часа</h2><small>Отправления по 20 самым загруженным маршрутам, время Алматы</small></div></div><${Heatmap} sim=${sim} now=${sample.now} /></section>
+        <h3>Состояние</h3><${Bars} rows=${[{ label: 'В пути', value: sample.moving }, { label: 'Плановая стоянка', value: sample.planned }, { label: 'Вынужденная стоянка', value: sample.forced, tone: 'danger' }]} />
+        <h3>Тяга</h3><${Bars} rows=${[{ label: 'Электровозы', value: sample.electric }, { label: 'Тепловозы', value: sample.diesel }]} />
+      </${Panel}>
+      <${Panel} id="hm-h" title="Нагрузка на ближайшие 24 часа" hint="Отправления по 20 самым загруженным маршрутам, время Алматы"><${Heatmap} sim=${sim} now=${sample.now} /></${Panel}>
     </div>
-    <section class="panel" aria-labelledby="ch-h"><div class="panel-head"><div><h2 id="ch-h">Характеристики модели</h2><small>Параметры, масштаб, правила и границы применимости</small></div></div>
-      <${Characteristics} sim=${sim} stations=${net && !net.error ? net.net.stations.length + net.net.halts.length : 0} counters=${counters} startedAt=${startedAt} /></section>`;
+    <${Panel} id="ch-h" title="Характеристики модели" hint="Параметры, масштаб, правила и границы применимости">
+      <${Characteristics} sim=${sim} stations=${net && !net.error ? net.net.stations.length + net.net.halts.length : 0} counters=${counters} startedAt=${startedAt} />
+    </${Panel}>`;
 }

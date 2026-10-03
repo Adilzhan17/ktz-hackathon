@@ -585,17 +585,19 @@ test('dispatcher panel API rejects invalid incidents', async ({ request }) => {
   }
 });
 
-test('model page: packets fly to the core in real time, data stream, metrics and characteristics', async ({ page }) => {
+test('model page: pipeline of stages, inputs and results, event tape and metrics update in real time', async ({ page }) => {
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/#/engine');
   await expect(page.getByRole('heading', { name: 'Модель', level: 1, exact: true })).toBeVisible();
-  const canvas = page.getByRole('img', { name: /Ядро модели/ });
-  await expect(canvas).toBeVisible();
-  await canvas.click({ position: { x: 215, y: 99 } });
-  await expect(page.locator('.nn-detail')).toContainText('Рейсы, которые сейчас в пути');
-  await expect.poll(async () => page.locator('.stream-line').count()).toBeGreaterThan(3);
+  await expect(page.getByRole('img', { name: /Конвейер модели/ })).toBeVisible();
+  await expect(page.locator('.stage-card')).toHaveCount(4);
+  await page.getByRole('button', { name: /Профили и положения/ }).click();
+  await expect(page.locator('.mrow.open .mrow-detail')).toContainText('кусочно-линейная');
+  await expect.poll(async () => page.locator('.tape-row').count()).toBeGreaterThan(1);
+  await page.getByRole('radio', { name: 'Решения', exact: true }).click();
+  await expect(page.locator('.tape-row.decision').first()).toBeVisible();
+  await expect(page.locator('.metric-card')).toHaveCount(12);
   await expect(page.getByRole('heading', { name: 'Характеристики модели' })).toBeVisible();
-  await expect(page.locator('.heat-row').first()).toBeVisible();
   const cycles = async () => Number(((await page.locator('.page-actions .badge').innerText()).match(/цикл ([\d\s\u00a0]+)/)?.[1] || '0').replace(/\D/g, ''));
   const first = await cycles();
   await expect.poll(cycles, { timeout: 5000 }).toBeGreaterThan(first + 3);   // 4 цикла в секунду
