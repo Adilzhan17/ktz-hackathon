@@ -2,6 +2,7 @@
 // только временем, поэтому после перезапуска сервера «вся сеть» продолжает жить без сохранения.
 // Маршруты — реальные пути по OpenStreetMap (public/data/kz-routes.json); расписание синтетическое.
 const TZ = 300; // Asia/Almaty, минут от UTC
+import { countComputation } from './computation-metrics.js';
 const executionPlans = new WeakMap();
 export function setNetworkPlan(sim, plan) {
   if (!plan?.executionEnabled) { executionPlans.delete(sim); return; }
@@ -109,7 +110,8 @@ function profileOf(service, uid, raw = false) {
   let cache = caches.get(service);
   if (!cache) { cache = new Map(); caches.set(service, cache); }
   const cached = cache.get(uid);
-  if (cached) return cached;
+  if (cached) { countComputation('profileCacheHits'); return cached; }
+  countComputation('profilesBuilt');
   const spec = CATEGORIES[service.cat];
   const h = hash(uid);
   const stops = service.stops.map(s => ({ ...s, planned: true, reason: 'плановая стоянка' }));
@@ -224,6 +226,7 @@ function characteristics(service, uid, profile, e, st, h, loco, wagons, loaded) 
 
 /** Все поезда сети в момент nowMs. */
 export function networkTrains(sim, nowMs, options = {}) {
+  countComputation('networkSnapshots');
   const execution = options.ignorePlan ? null : executionPlans.get(sim);
   if (!execution) return baseNetworkTrains(sim, nowMs, options);
   const out = baseNetworkTrains(sim, nowMs, options).filter(t => !execution.ids.has(t.uid));
@@ -383,6 +386,7 @@ function baseNetworkEvents(sim, nowMs, windowMin = 360) {
 
 /** События сети за последние windowMin минут: отправления, прибытия, стоянки (по расписанию и вынужденные). */
 function buildNetworkEvents(sim, nowMs, windowMin = 360) {
+  countComputation('eventWindows');
   const now = nowMs / 60000 + TZ, from = now - windowMin;
   const list = [];
   for (const s of sim.services) {

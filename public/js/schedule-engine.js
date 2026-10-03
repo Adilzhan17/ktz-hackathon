@@ -1,6 +1,7 @@
 // Сравнение двух планов на одинаковых заявках и одном пуле тяги. Не меняет исходные объекты.
 import { scheduledTrips, networkTrains } from './network-sim.js';
 import { fleetStandingMetrics } from './operational-metrics.js';
+import { countComputation } from './computation-metrics.js';
 
 const WEIGHT = { passenger: 10, container: 2, freight: 1 };
 export const SCHEDULE_DEFAULTS = { horizonH: 12, reserve: 2, turnaroundMin: 45, couplingMin: 20, headwayMin: 10, maxFreightT: 6000, maxPassengerT: 2000, maxShiftMin: 30 };
@@ -29,10 +30,13 @@ export function planningFleet(trips, active, now, config) {
 }
 
 export function allocateTrips(trips, fleet, config, optimized = true, constraints = [], committed = []) {
+  countComputation('allocationRuns');
   const locos = fleet.map(l => ({ ...l })), rows = [], slots = new Map();
   // Сначала более ранние заявки; при одинаковом времени — пассажирские, затем контейнерные.
   const ordered = [...trips].sort((a, b) => a.departedMs - b.departedMs || WEIGHT[b.category] - WEIGHT[a.category] || a.uid.localeCompare(b.uid));
   for (const source of ordered) {
+    countComputation('tripAssignments');
+    countComputation('compatibilityInspections', locos.length * 2);
     const t = { ...source };
     for (const key of ['departure', 'arrival', 'couplingAt', 'locoReady', 'waitMin', 'idleMin', 'locoId', 'assignedSeries', 'traction', 'status', 'reason', 'search', 'timing', 'proposedDeparture', 'proposedLoco', 'proposedWaitMin']) delete t[key];
     const slotKey = `${t.routeId}:${t.dir}`;

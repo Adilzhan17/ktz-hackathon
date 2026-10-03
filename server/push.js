@@ -1,7 +1,7 @@
 import webpush from 'web-push';
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 export function validateSubscription(sub) {
   const url = new URL(sub?.endpoint);
@@ -16,6 +16,8 @@ export class JournalPush {
     this.file = directory ? path.join(directory, 'web-push-private.json') : null;
     this.data = this.file && existsSync(this.file) ? JSON.parse(readFileSync(this.file, 'utf8')) : { vapid: webpush.generateVAPIDKeys(), subscriptions: [] };
     this.send = send; this.queue = []; this.running = false; this.dropped = 0; this.failed = 0; this.delivered = 0;
+    this.expired = 0; this.received = 0; this.lastError = null; this.lastAcceptedAt = null; this.lastReceivedAt = null;
+    this.receipts = new Map(); this.statuses = new Map(); this.lastTest = new Map();
     this.save();
   }
   save() {
@@ -30,6 +32,59 @@ export class JournalPush {
     if (!existing && this.data.subscriptions.length >= 100) throw new Error('Лимит подписок исчерпан');
     if (existing) { existing.keys = sub.keys; } else this.data.subscriptions.push(sub);
     this.save();
+  }
+  owned(raw) {
+    const sub = validateSubscription(raw);
+    return this.data.subscriptions.find(s => s.endpoint === sub.endpoint && s.keys.auth === sub.keys.auth && s.keys.p256dh === sub.keys.p256dh);
+  }
+  status(raw) {
+    const sub = validateSubscription(raw);
+    return { registered: Boolean(this.owned(sub)), ...(this.statuses.get(sub.endpoint) || {}) };
+  }
+  diagnostics() {
+    return { subscriptions: this.data.subscriptions.length, queued: this.queue.length, sending: this.running,
+      accepted: this.delivered, failed: this.failed, expired: this.expired, dropped: this.dropped,
+      received: this.received, lastError: this.lastError, lastAcceptedAt: this.lastAcceptedAt, lastReceivedAt: this.lastReceivedAt };
+  }
+  receipt(token) {
+    const record = this.receipts.get(token);
+    if (!record || Date.now() - record.at > 3600000) return false;
+    this.receipts.delete(token); this.received++; this.lastReceivedAt = Date.now();
+    const status = this.statuses.get(record.endpoint) || {};
+    this.statuses.set(record.endpoint, { ...status, receivedAt: this.lastReceivedAt });
+    return true;
+  }
+  async test(raw) {
+    const sub = this.owned(raw);
+    if (!sub) throw new Error('Подписка не найдена на сервере. Включите уведомления заново.');
+    if (Date.now() - (this.lastTest.get(sub.endpoint) || 0) < 30000) throw new Error('Следующий тест доступен через 30 секунд.');
+    this.lastTest.set(sub.endpoint, Date.now());
+    return this.deliver({ sub, event: { id: `test:${Date.now()}`, text: 'Проверка доставки: уведомления КТЖ работают на этом устройстве.', at: Date.now() } });
+  }
+  async deliver({ event, sub }) {
+    const token = randomBytes(24).toString('hex');
+    for (const [key, value] of this.receipts) if (Date.now() - value.at > 3600000) this.receipts.delete(key);
+    if (this.receipts.size >= 10000) this.receipts.delete(this.receipts.keys().next().value);
+    this.receipts.set(token, { endpoint: sub.endpoint, at: Date.now() });
+    try {
+      await this.send(sub, JSON.stringify({ title: `КТЖ · ${event.number ? '№' + event.number : 'Модель'}`, body: event.text.slice(0, 650), id: event.id, at: event.at, receipt: token }), {
+        vapidDetails: { subject: 'https://ktz.perricheno.com', ...this.data.vapid }, timeout: 8000, TTL: 3600,
+        topic: createHash('sha256').update(event.id).digest('base64url').slice(0, 32),
+      });
+      this.delivered++; this.lastAcceptedAt = Date.now();
+      this.statuses.set(sub.endpoint, { ...this.statuses.get(sub.endpoint), acceptedAt: this.lastAcceptedAt, error: null });
+      return { accepted: true, message: 'Push-сервис принял сообщение. Это ещё не подтверждение показа на телефоне.' };
+    } catch (error) {
+      this.receipts.delete(token); this.failed++;
+      const status = Number(error.statusCode) || null;
+      const reason = [401, 403].includes(status) ? 'Push-сервис отклонил авторизацию: переподключите уведомления.'
+        : [404, 410].includes(status) ? 'Подписка устарела: включите уведомления заново.'
+        : status === 429 ? 'Push-сервис ограничил частоту сообщений.' : status ? `Ошибка push-сервиса HTTP ${status}.` : 'Нет ответа push-сервиса: проверьте соединение сервера.';
+      this.lastError = { at: Date.now(), status, provider: new URL(sub.endpoint).hostname, reason };
+      this.statuses.set(sub.endpoint, { ...this.statuses.get(sub.endpoint), error: reason, failedAt: Date.now() });
+      if ([404, 410].includes(status)) { this.expired++; this.data.subscriptions = this.data.subscriptions.filter(s => s.endpoint !== sub.endpoint); this.save(); }
+      return { accepted: false, message: reason };
+    }
   }
   remove(raw) {
     const sub = validateSubscription(raw);
@@ -52,16 +107,7 @@ export class JournalPush {
         await Promise.all(batch.map(async item => {
           const { event, sub } = item;
           if (!this.data.subscriptions.some(s => s.endpoint === sub.endpoint)) return;
-          try {
-            await this.send(sub, JSON.stringify({ title: `КТЖ · ${event.number ? '№' + event.number : 'Модель'}`, body: event.text.slice(0, 650), id: event.id, at: event.at }), {
-              vapidDetails: { subject: 'https://ktz.perricheno.com', ...this.data.vapid }, timeout: 8000, TTL: 3600,
-              topic: createHash('sha256').update(event.id).digest('base64url').slice(0, 32),
-            });
-            this.delivered++;
-          } catch (error) {
-            if ([404, 410].includes(error.statusCode)) { this.data.subscriptions = this.data.subscriptions.filter(s => s.endpoint !== sub.endpoint); this.save(); }
-            else { this.failed++; /* Journal remains authoritative; do not retry-storm the push service. */ }
-          }
+          await this.deliver({ event, sub });
         }));
       }
     } finally { this.running = false; }

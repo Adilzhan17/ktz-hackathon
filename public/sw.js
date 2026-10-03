@@ -7,6 +7,10 @@ self.addEventListener('push', event => {
   event.waitUntil(self.registration.showNotification(payload.title || 'КТЖ', {
     body: payload.body, icon: '/assets/ktz-emblem.png', badge: '/assets/ktz-emblem.png',
     tag: payload.id, timestamp: payload.at, data: { url: '/#/log', id: payload.id },
+  }).then(async () => {
+    if (payload.receipt) {
+      try { await fetch('/api/push/receipt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: payload.receipt }) }); } catch { /* notification already displayed; receipt is best effort */ }
+    }
   }));
 });
 self.addEventListener('notificationclick', event => {

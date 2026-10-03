@@ -16,6 +16,7 @@ import { NetworkPage } from './network-map.js';
 import { useNetworkTotals } from './network-data.js';
 import { QuickSearch } from './search.js';
 import { InstallApp } from './install-app.js';
+import { DevelopersPage } from './developers.js';
 
 const NAV = [
   { page: 'network', path: '/', label: 'Карта сети', icon: 'map-pin' },
@@ -28,8 +29,9 @@ const NAV = [
   { page: 'fleet', path: '/fleet', label: 'Парк и депо', icon: 'truck' },
   { page: 'overview', path: '/overview', label: 'Диспетчерская панель', icon: 'chart-gantt', also: ['decisions', 'map'] },
   { page: 'how', path: '/how', label: 'Как это работает', icon: 'book-open' },
+  { page: 'developers', path: '/developers', label: 'Разработчикам', icon: 'activity' },
 ];
-const TITLES = { schedules: 'Расписания', network: 'Карта сети', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', stats: 'Статистика', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
+const TITLES = { developers: 'Разработчикам', schedules: 'Расписания', network: 'Карта сети', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', stats: 'Статистика', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
 function Nav({ page, onAbout, attention, mini, onMini }) {
   const more = useRef(null);
@@ -98,6 +100,7 @@ function App() {
     model: html`<${ModelPage} data=${data} />`,
     stats: html`<${StatsPage} data=${data} />`,
     schedules: html`<${SchedulesPage} />`,
+    developers: html`<${DevelopersPage} />`,
     how: html`<${HowPage} />`,
     trains: html`<${Trains} data=${data} />`,
     stations: html`<${Stations} data=${data} />`,

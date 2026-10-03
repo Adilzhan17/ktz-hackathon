@@ -13,6 +13,8 @@ import { buildSchedule, scheduleEconomics } from '../public/js/schedule-engine.j
 import { replanLocally, extendSchedule, SERVICE_TYPES } from '../public/js/schedule-disruptions.js';
 import { ECONOMIC_REFERENCE } from '../public/js/economic-reference.js';
 import { JournalPush } from './push.js';
+import { Telemetry } from './telemetry.js';
+const telemetry = new Telemetry();
 
 // KTZ_AUTOPLAY=0 — детерминированный режим для тестов: время стоит, события выключены, состояние не сохраняется.
 // Иначе модель живёт в реальном времени: расписание строится непрерывно, события случаются сами, состояние хранится на диске.
@@ -47,8 +49,10 @@ function save() {
   if (!autoplay) return;
   try {
     mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-    writeFileSync(`${STATE_FILE}.tmp`, JSON.stringify({ ...state, version: 2 }));
+    const body = JSON.stringify({ ...state, version: 2 });
+    writeFileSync(`${STATE_FILE}.tmp`, body);
     renameSync(`${STATE_FILE}.tmp`, STATE_FILE);
+    telemetry.write('Состояние участка', Buffer.byteLength(body));
   } catch (error) { console.error('Не удалось сохранить состояние:', error.message); }
 }
 let state = load();
@@ -80,7 +84,7 @@ if (autoplay && existsSync(SCHEDULE_FILE)) {
 }
 function persistSchedule() {
   setNetworkPlan(network, savedSchedule.plan);
-  if (autoplay) { mkdirSync(path.dirname(SCHEDULE_FILE), { recursive: true }); writeFileSync(`${SCHEDULE_FILE}.tmp`, JSON.stringify(savedSchedule)); renameSync(`${SCHEDULE_FILE}.tmp`, SCHEDULE_FILE); }
+  if (autoplay) { const body = JSON.stringify(savedSchedule); mkdirSync(path.dirname(SCHEDULE_FILE), { recursive: true }); writeFileSync(`${SCHEDULE_FILE}.tmp`, body); renameSync(`${SCHEDULE_FILE}.tmp`, SCHEDULE_FILE); telemetry.write('Расписание', Buffer.byteLength(body)); }
   const message = `event: schedule\ndata: ${JSON.stringify(savedSchedule)}\n\n`;
   sendStream(scheduleClients, message);
 }
@@ -96,12 +100,12 @@ if (!savedSchedule.plan || savedSchedule.plan.version < 3) {
 setNetworkPlan(network, savedSchedule.plan);
 function applyScheduleIncident(incident) {
   if (savedSchedule.plan.constraints?.some(c => c.id === incident.id)) return;
-  const plan = replanLocally(savedSchedule.plan, incident, state.now);
+  const plan = telemetry.measure('Локальный пересчёт', () => replanLocally(savedSchedule.plan, incident, state.now));
   savedSchedule = { ...savedSchedule, plan, auto: true, savedAt: Date.now(), economics: scheduleEconomics(plan, savedSchedule.rates) };
   persistSchedule();
 }
 let archive;
-try { archive = new NetworkArchive({ sim: network, now: state.now, file: autoplay ? path.join(path.dirname(STATE_FILE), 'network-events.jsonl') : null }); }
+try { archive = new NetworkArchive({ sim: network, now: state.now, file: autoplay ? path.join(path.dirname(STATE_FILE), 'network-events.jsonl') : null, onWrite: (bytes, records) => telemetry.write('Журнал', bytes, records) }); }
 catch (error) { console.error('Архив сети недоступен (движение продолжено, файл сохранён):', error); }
 const networkClients = new Set();
 function archiveTick() {
@@ -119,6 +123,10 @@ function archiveTick() {
   }
 }
 const clients = new Set();
+const developerClients = new Set();
+const developerSnapshot = () => telemetry.sample({ state, archive, plan: savedSchedule.plan, push: journalPush,
+  streams: { state: clients.size, journal: networkClients.size, schedule: scheduleClients.size, developers: developerClients.size },
+  files: autoplay ? [['Состояние участка', STATE_FILE], ['Расписание', SCHEDULE_FILE], ['Журнал', path.join(path.dirname(STATE_FILE), 'network-events.jsonl')]] : [] });
 const publicRoot = new URL('../public/', import.meta.url);
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '127.0.0.1';
@@ -130,8 +138,8 @@ function json(res, status, data) {
   res.end(JSON.stringify(data));
 }
 function broadcast() {
-  const message = `data: ${JSON.stringify(snapshot(state))}\n\n`;
-  for (const res of clients) res.write(message);
+  const message = `data: ${JSON.stringify(telemetry.measure('Снимок участка', () => snapshot(state)))}\n\n`;
+  sendStream(clients, message);
 }
 const clock = () => `event: clock\ndata: ${JSON.stringify({ now: state.now, running: state.running, speed: state.speed, synced: state.synced })}\n\n`;
 // Ход времени: раз в секунду. Реальный ход (×1) идёт всегда; ускорение — только пока кто-то смотрит.
@@ -141,10 +149,10 @@ const timer = setInterval(() => {
   ticks += 1;
   if (state.speed > 1 && !clients.size) { state.speed = 1; state.synced = false; }
   let changed = false;
-  try { changed = tick(state, 1, Date.now()); } catch (error) { console.error('Ошибка шага модели:', error); }
-  try { archiveTick(); } catch (error) { console.error('Ошибка архива сети:', error); }
+  try { changed = telemetry.measure('Шаг модели', () => tick(state, 1, Date.now())); } catch (error) { console.error('Ошибка шага модели:', error); }
+  try { telemetry.measure('Архив событий', archiveTick); } catch (error) { console.error('Ошибка архива сети:', error); }
   try {
-    const plan = extendSchedule(network, savedSchedule.plan, state.now);
+    const plan = telemetry.measure('Продление расписания', () => extendSchedule(network, savedSchedule.plan, state.now));
     if (plan !== savedSchedule.plan) { savedSchedule = { ...savedSchedule, plan, economics: scheduleEconomics(plan, savedSchedule.rates) }; persistSchedule(); }
   } catch (error) { console.error('Ошибка продления расписания:', error); }
   if (clients.size) {
@@ -152,17 +160,30 @@ const timer = setInterval(() => {
     else for (const res of clients) res.write(clock());
   }
   if (ticks % 20 === 0) save();
+  const diagnostics = developerSnapshot();
+  if (developerClients.size) sendStream(developerClients, `event: telemetry\ndata: ${JSON.stringify(diagnostics)}\n\n`);
 }, 1000);
 const server = http.createServer(async (req, res) => {
+  telemetry.request(req, res);
   const url = new URL(req.url, 'http://localhost');
   try {
+    if (req.method === 'GET' && url.pathname === '/api/developer-metrics') return json(res, 200, telemetry.latest || developerSnapshot());
+    if (req.method === 'GET' && url.pathname === '/api/developer-events') {
+      if (developerClients.size >= 30) return json(res, 503, { error: 'Лимит диагностических подключений, повторите позже' });
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      res.write(`event: telemetry\ndata: ${JSON.stringify(telemetry.latest || developerSnapshot())}\n\n`);
+      registerStream(developerClients, req, res); return;
+    }
     if (req.method === 'GET' && url.pathname === '/api/push/config') return json(res, journalPush ? 200 : 503, journalPush ? { publicKey: journalPush.data.vapid.publicKey } : { error: 'Push недоступен' });
-    if (req.method === 'POST' && ['/api/push/subscribe', '/api/push/unsubscribe'].includes(url.pathname)) {
-      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });
+    if (req.method === 'POST' && ['/api/push/subscribe', '/api/push/unsubscribe', '/api/push/status', '/api/push/test', '/api/push/receipt'].includes(url.pathname)) {
+      if (req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) return json(res, 403, { error: 'Недопустимый источник запроса' });
       if (!journalPush) return json(res, 503, { error: 'Push недоступен' });
       let body = '';
       for await (const chunk of req) { body += chunk; if (body.length > 8192) return json(res, 413, { error: 'Слишком большой запрос' }); }
       const input = JSON.parse(body);
+      if (url.pathname.endsWith('/receipt')) return json(res, 200, { ok: journalPush.receipt(input.token) });
+      if (url.pathname.endsWith('/status')) return json(res, 200, journalPush.status(input));
+      if (url.pathname.endsWith('/test')) return json(res, 200, await journalPush.test(input));
       if (url.pathname.endsWith('/unsubscribe')) journalPush.remove(input); else journalPush.add(input);
       return json(res, 200, { ok: true });
     }
@@ -204,7 +225,6 @@ const server = http.createServer(async (req, res) => {
       const plan = savedSchedule.plan?.executionEnabled ? savedSchedule.plan : buildSchedule(network, input.createdAt, input.config, input.routeId);
       const economics = scheduleEconomics(plan, input.rates);
       const next = { savedAt: Date.now(), plan, rates: economics.rates, economics };
-      if (autoplay) { mkdirSync(path.dirname(SCHEDULE_FILE), { recursive: true }); writeFileSync(`${SCHEDULE_FILE}.tmp`, JSON.stringify(next)); renameSync(`${SCHEDULE_FILE}.tmp`, SCHEDULE_FILE); }
       savedSchedule = next;
       persistSchedule();
       return json(res, 200, savedSchedule);
@@ -249,7 +269,7 @@ const server = http.createServer(async (req, res) => {
       }
       const action = JSON.parse(body);
       if (action?.type === 'reset') { state = fresh(); save(); }
-      else act(state, action);
+      else telemetry.measure('Команда диспетчера', () => act(state, action));
       archiveTick(); broadcast(); return json(res, 200, snapshot(state));
     }
     if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'Метод API не найден' });
@@ -283,4 +303,4 @@ const server = http.createServer(async (req, res) => {
 const heartbeat = setInterval(() => { for (const res of [...clients, ...networkClients, ...scheduleClients]) res.write(': heartbeat\n\n'); }, 1000);
 server.listen(port, host, () => console.log(`Автодиспетчер: http://${host}:${port}`));
 server.on('error', error => { console.error(error.message); clearInterval(heartbeat); clearInterval(timer); process.exit(1); });
-process.on('SIGTERM', () => { save(); clearInterval(heartbeat); clearInterval(timer); for (const client of [...clients, ...networkClients, ...scheduleClients]) client.end(); server.close(); });
+process.on('SIGTERM', () => { save(); telemetry.close(); clearInterval(heartbeat); clearInterval(timer); for (const client of [...clients, ...networkClients, ...scheduleClients, ...developerClients]) client.end(); server.close(); });

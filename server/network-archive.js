@@ -4,7 +4,8 @@ import { networkEvents } from '../public/js/network-sim.js';
 
 // Append-only journal. Restart preserves both records and the start of the archive.
 export class NetworkArchive {
-  constructor({ sim, now, file = null }) {
+  constructor({ sim, now, file = null, onWrite = () => {} }) {
+    this.onWrite = onWrite;
     this.sim = sim; this.file = file; this.events = []; this.ids = new Set();
     this.startedAt = now - 86400000; this.through = this.startedAt;
     if (file && existsSync(file)) {
@@ -19,7 +20,8 @@ export class NetworkArchive {
       this.through = Math.max(this.startedAt, ...this.events.slice(-1).map(e => e.at));
     } else if (file) {
       mkdirSync(path.dirname(file), { recursive: true });
-      appendFileSync(file, JSON.stringify({ meta: true, version: 1, startedAt: this.startedAt }) + '\n');
+      const body = JSON.stringify({ meta: true, version: 1, startedAt: this.startedAt }) + '\n';
+      appendFileSync(file, body); this.onWrite(Buffer.byteLength(body), 0);
     }
     this.advance(now);
   }
@@ -38,7 +40,7 @@ export class NetworkArchive {
     }
     fresh.sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
     if (this.file && fresh.length) {
-      try { appendFileSync(this.file, fresh.map(e => JSON.stringify(e)).join('\n') + '\n'); }
+      try { const body = fresh.map(e => JSON.stringify(e)).join('\n') + '\n'; appendFileSync(this.file, body); this.onWrite(Buffer.byteLength(body), fresh.length); }
       catch (error) { for (const e of fresh) this.ids.delete(e.id); throw error; }
     }
     this.events.push(...fresh); this.through = now;

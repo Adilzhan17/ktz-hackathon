@@ -19,3 +19,23 @@ test('opt-in receives each new event individually, removing subscription stops s
   push.remove(sub); push.enqueue([{ id: 'c', text: 'c' }]);
   await new Promise(resolve => setImmediate(resolve)); assert.equal(sent.length, 2);
 });
+test('status distinguishes browser subscription, provider acceptance and display receipt', async () => {
+  let payload;
+  const push = new JournalPush(null, { send: async (_, body) => { payload = JSON.parse(body); } });
+  assert.equal(push.status(sub).registered, false);
+  push.add(sub); assert.equal(push.status(sub).registered, true);
+  assert.equal((await push.test(sub)).accepted, true);
+  assert.equal(push.diagnostics().accepted, 1); assert.equal(push.diagnostics().received, 0);
+  assert.ok(push.receipt(payload.receipt)); assert.equal(push.receipt(payload.receipt), false);
+  assert.equal(push.diagnostics().received, 1); assert.ok(push.status(sub).receivedAt);
+  const publicData = JSON.stringify(push.diagnostics());
+  assert.ok(!publicData.includes(sub.endpoint)); assert.ok(!publicData.includes(sub.keys.auth));
+  await assert.rejects(push.test(sub), /30 секунд/);
+});
+test('failed sends expose safe reason and stale subscription is removed', async () => {
+  const push = new JournalPush(null, { send: async () => { const e = new Error(sub.endpoint); e.statusCode = 410; throw e; } });
+  push.add(sub);
+  assert.equal((await push.test(sub)).accepted, false);
+  assert.equal(push.status(sub).registered, false); assert.equal(push.diagnostics().expired, 1);
+  assert.ok(!JSON.stringify(push.diagnostics()).includes('/test'));
+});
