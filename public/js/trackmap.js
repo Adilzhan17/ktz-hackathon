@@ -5,7 +5,7 @@ import { app, act, go, href, updateUi, useLiveNow, liveNow, clock } from './stor
 import { Button, Badge, Segmented } from './ui.js';
 
 // ---- геометрия схемы (условные единицы; SVG масштабируется) ----
-const MARGIN = 150, STEP = 150, H = 478, HALF = 42, CARGO_Y = 348;
+const MARGIN = 150, STEP = 300, H = 478, HALF = 42, CARGO_Y = 348;
 const Y_ODD = 188, Y_EVEN = 254;           // главные пути: сверху нечётный (←), снизу чётный (→)
 const TRAIN_W = 64, TRAIN_H = 22;
 const stationX = i => MARGIN + i * STEP;
@@ -157,11 +157,17 @@ function trainStatus(data, rec, tMin) {
 }
 
 const TL = { odd: '#c8554d', even: 'var(--accent)' };
-/** Светофор: красный или зелёный. */
+/** Светофор: опора, корпус и три линзы; горит одна. */
+function Signal({ x, y, aspect, label, poleTo }) {
+  const lamps = [['red', -9], ['yellow', 0], ['green', 9]];
+  return html`<g transform=${`translate(${x} ${y})`} class="m-tl"><title>${label}</title>
+    ${poleTo != null && html`<line x1="0" x2="0" y1="0" y2=${poleTo - y} class="m-pole"/>`}
+    <rect x="-7" y="-15" width="14" height="30" rx="7" class="m-sg-body"/>
+    ${lamps.map(([name, cy]) => html`<circle key=${name} cy=${cy} r="3.8" class=${`lamp ${aspect === name ? `on-${name}` : 'off'}`}/>`)}</g>`;
+}
+const ASPECT_TEXT = { red: 'красный: занято или закрыто', yellow: 'жёлтый: следующий блок занят', green: 'зелёный: свободно' };
 function Light({ x, y, red, label }) {
-  return html`<g transform=${`translate(${x} ${y})`} class="m-tl"><title>${label}: ${red ? 'закрыт' : 'открыт'}</title>
-    <rect x="-5" y="-12" width="10" height="24" rx="5" class="m-tl-body"/>
-    <circle cy="-5" r="3" class=${red ? 'on-red' : 'off'}/><circle cy="5" r="3" class=${red ? 'off' : 'on-green'}/></g>`;
+  return html`<${Signal} x=${x} y=${y} aspect=${red ? 'red' : 'green'} label=${`${label}: ${red ? 'закрыт' : 'открыт'}`} />`;
 }
 
 function Station({ s, i, last, tracks, selected, ready, enRoute, onPick, lights, present = [] }) {
@@ -363,8 +369,7 @@ export function TrackMap({ data, selectedTrain, onTrain, onStation }) {
         ${data.restrictions.filter(r => (r.from == null || tMin >= r.from) && (r.until == null || tMin < r.until)).map(r => html`<g key=${r.segment} transform=${`translate(${stationX(r.segment) + STEP / 2} ${Y_EVEN + 42})`}>
           <circle r="16" class="m-sign"/><text y="5" text-anchor="middle" class="m-sign-t">${r.kmh}</text></g>`)}
         ${signals.map(s => data.network
-          ? html`<g key=${s.k} class="m-bsig"><title>${`Блок-сигнал, ${s.line} путь: ${s.red ? 'красный — блок занят или закрыт' : s.yellow ? 'жёлтый — следующий блок занят' : 'зелёный — свободно'}`}</title>
-              <line x1=${s.x} x2=${s.x} y1=${s.y} y2=${s.y + (s.dir > 0 ? -8 : 8)} class="m-pole"/><circle cx=${s.x} cy=${s.y} r="5" class=${`m-sig ${s.red ? 'red' : s.yellow ? 'yellow' : 'green'}`}/></g>`
+          ? html`<${Signal} key=${s.k} x=${s.x} y=${s.dir > 0 ? Y_EVEN + 34 : Y_ODD - 34} poleTo=${s.dir > 0 ? Y_EVEN + 5 : Y_ODD - 5} aspect=${s.red ? 'red' : s.yellow ? 'yellow' : 'green'} label=${`Блок-сигнал, ${s.line} путь, ${ASPECT_TEXT[s.red ? 'red' : s.yellow ? 'yellow' : 'green']}`} />`
           : html`<circle key=${s.k} cx=${s.x} cy=${s.y} r="5" class=${`m-sig ${s.red ? 'red' : ''}`}/>`)}
         ${live.map(rec => {
           const { t } = rec;

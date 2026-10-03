@@ -84,9 +84,9 @@
 .m-sect-t { font-size: 12px; font-weight: 650; fill: var(--text-2); }
 .m-chev { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
 .m-chev.odd { stroke: #c8554d; } .m-chev.even { stroke: var(--accent); }
-.m-tl-body { fill: #26333c; }
-.m-tl circle { fill: #3a4954; }
-.m-tl .on-red { fill: #e5534b; } .m-tl .on-green { fill: #3fb37f; } .m-tl .off { fill: #3a4954; }
+.m-sg-body { fill: #26333c; stroke: #0f171c; stroke-width: 1.5; }
+.m-tl .lamp { fill: #3a4954; }
+.m-tl .lamp.on-red { fill: #ff5a4f; filter: drop-shadow(0 0 3px #ff5a4f); } .m-tl .lamp.on-yellow { fill: #ffc21a; filter: drop-shadow(0 0 3px #ffc21a); } .m-tl .lamp.on-green { fill: #3fe08f; filter: drop-shadow(0 0 3px #3fe08f); }
 .lg-plat { display: inline-block; width: 26px; height: 8px; border-radius: 2px; background: #aebbc6; }
 .lg-sep { flex-basis: 100%; height: 0; }
 
