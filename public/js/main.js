@@ -15,6 +15,7 @@ import { FleetPage } from './fleet.js';
 import { NetworkPage } from './network-map.js';
 import { useNetworkTotals } from './network-data.js';
 import { QuickSearch } from './search.js';
+import { InstallApp } from './install-app.js';
 
 const NAV = [
   { page: 'network', path: '/', label: 'Карта сети', icon: 'map-pin' },
@@ -111,7 +112,7 @@ function App() {
       <${Topbar} data=${data} onReset=${() => setDialog('reset')} onSearch=${() => setDialog('search')} />
       ${!app.online && html`<div class="offline" role="alert"><${Icon} name="wifi-off" size=${18} /> Нет соединения с сервером. Действия временно недоступны — подключаемся заново…</div>`}
       <main id="main" tabindex="-1">${page}</main>
-      <footer class="foot"><span>Помощник диспетчера. Решение принимает поездной диспетчер.</span><span>Система не заменяет СЦБ и сертифицированные системы безопасности.</span></footer>
+      <footer class="foot"><span>Помощник диспетчера. Решение принимает поездной диспетчер.</span><${InstallApp} /><span>Система не заменяет СЦБ и сертифицированные системы безопасности.</span></footer>
     </div>
     <${Toasts} />
     <${QuickSearch} data=${data} open=${dialog === 'search'} onClose=${() => setDialog(null)} />

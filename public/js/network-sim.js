@@ -2,6 +2,13 @@
 // только временем, поэтому после перезапуска сервера «вся сеть» продолжает жить без сохранения.
 // Маршруты — реальные пути по OpenStreetMap (public/data/kz-routes.json); расписание синтетическое.
 const TZ = 300; // Asia/Almaty, минут от UTC
+const executionPlans = new WeakMap();
+export function setNetworkPlan(sim, plan) {
+  if (!plan?.executionEnabled) { executionPlans.delete(sim); return; }
+  if (executionPlans.get(sim)?.plan === plan) return;
+  const services = new Map(sim.services.map(s => [s.id, { routes: [s.route], services: [s], byId: sim.byId }]));
+  executionPlans.set(sim, { plan, services, ids: new Set(plan.optimized.rows.map(r => r.uid)) });
+}
 
 function hash(str) { let h = 2166136261 >>> 0; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return h; }
 
@@ -10,7 +17,7 @@ export const CATEGORIES = {
   container: { label: 'Контейнерный', short: 'конт.', holdPct: 14, hold: [15, 60], dwell: [20, 45], stopEvery: 230 },
   freight: { label: 'Грузовой', short: 'груз.', holdPct: 22, hold: [20, 95], dwell: [30, 75], stopEvery: 170 },
 };
-const HOLD_REASONS = ['пропуск встречного поезда', 'ожидание свободного пути', 'смена локомотивной бригады', 'ожидание подачи на станцию', 'устранение неисправности'];
+const HOLD_REASONS = ['пропуск встречного поезда', 'ожидание свободного пути', 'ожидание подачи на станцию', 'устранение неисправности'];
 const CARGO = ['уголь', 'зерно', 'нефтепродукты', 'руда', 'металл', 'химические грузы', 'строительные грузы'];
 
 // Частота рейсов (в сутки на направление) — настроена так, чтобы на сети одновременно было около 700 поездов.
@@ -39,7 +46,7 @@ export function prepare(data) {
         const run = Math.max(plan - dwellSum, plan * 0.55);
         const id = `${route.id}:${dir}:${cat}`;
         const maxHold = spec.hold[1];
-        const tMax = run + dwellSum + maxHold;
+        const tMax = run + dwellSum + maxHold + stops.length * 14;
         const parity = dir === 'fwd' ? 0 : 1;
         const copies = Math.ceil(tMax / period) + 1;
         const base = next[cat][parity];
@@ -66,10 +73,12 @@ function pickStops(route, spec, dir) {
   return out;
 }
 
-const profiles = new Map();
+const profiles = new WeakMap();
 /** Расписание одного рейса: остановки с временем прибытия и стоянкой, с учётом случайной задержки. */
 function profileOf(service, uid) {
-  const cached = profiles.get(uid);
+  let cache = profiles.get(service);
+  if (!cache) { cache = new Map(); profiles.set(service, cache); }
+  const cached = cache.get(uid);
   if (cached) return cached;
   const spec = CATEGORIES[service.cat];
   const h = hash(uid);
@@ -84,7 +93,7 @@ function profileOf(service, uid) {
   let t = 0, km = 0;
   const speed = service.route.km / service.run * 60; // км/ч в движении
   const pre = (h >>> 3) % 200;                 // сколько бригада уже отработала к отправлению, мин
-  const limit = 330 + ((h >>> 11) % 90);       // предел непрерывной работы бригады, мин
+  const limit = 480; // Плановая смена 8 ч; настройка модели, не универсальный норматив.
   let worked = pre;
   stops.forEach((s, i) => {
     const travel = (s.km - km) / speed * 60;
@@ -92,14 +101,15 @@ function profileOf(service, uid) {
     const nextTravel = ((stops[i + 1]?.km ?? service.route.km) - s.km) / speed * 60;
     let dwell = s.dwell, crew = false, reason = s.reason;
     const workedHere = Math.round(worked);
-    if (worked + nextTravel > limit) { crew = true; dwell += 14; worked = 0; if (s.planned) reason = 'смена локомотивной бригады'; } else worked += dwell;
-    legs.push({ t, km, dwell, reason, planned: s.planned, name: s.name, crew, workedMin: workedHere, track: 1 + ((h >>> (i + 5)) % 6) });
+    const projectedMin = worked + dwell + nextTravel;
+    if (projectedMin > limit) { crew = true; dwell += 14; worked = 14; if (s.planned) reason = 'смена локомотивной бригады'; } else worked += dwell;
+    legs.push({ t, km, dwell, reason, planned: s.planned, name: s.name, crew, workedMin: workedHere, projectedMin: Math.ceil(projectedMin), nextStation: stops[i + 1]?.name || (service.dir === 'fwd' ? service.route.to : service.route.from), track: 1 + ((h >>> (i + 5)) % 6) });
     t += dwell;
   });
   t += (service.route.km - km) / speed * 60;
   const profile = { legs, total: t, speed, extra: holdAt >= 0 ? extra : 0, holdAt, pre, limit };
-  if (profiles.size > 8000) profiles.clear();
-  profiles.set(uid, profile);
+  if (cache.size > 1000) cache.clear();
+  cache.set(uid, profile);
   return profile;
 }
 
@@ -144,11 +154,14 @@ function characteristics(service, uid, profile, e, st, h, loco, wagons, loaded) 
   // бригада
   let lastChange = null, next = null;
   for (const leg of legs) if (leg.crew) { if (leg.t + leg.dwell <= e) lastChange = leg; else if (!next) next = leg; }
-  const worked = lastChange ? e - (lastChange.t + lastChange.dwell) : profile.pre + e;
+  const worked = lastChange ? 14 + e - (lastChange.t + lastChange.dwell) : profile.pre + e;
+  const changeCount = legs.filter(l => l.crew && l.t + l.dwell <= e).length;
   const crew = {
-    number: 1000 + (h % 8000), workedMin: Math.round(worked), limitMin: Math.round(profile.limit), leftMin: Math.max(0, Math.round(profile.limit - worked)),
+    number: 1000 + ((h + changeCount * 137) % 8000), workedMin: Math.round(worked), limitMin: Math.round(profile.limit), leftMin: Math.max(0, Math.round(profile.limit - worked)),
     nextChange: next ? next.name : 'на конечной станции', changing: Boolean(st.stopped && legs.some(l => l.crew && e >= l.t && e <= l.t + l.dwell)),
-    restAfterH: 12, size: cat === 'passenger' ? 'машинист, помощник, бригада проводников' : 'машинист, помощник',
+    restAfterH: null, restReason: 'По графику конкретной бригады; индивидуальный оборот и отдых пока не рассчитываются',
+    changeReason: next ? `До ${next.nextStation} без замены получится ${next.projectedMin} мин при плановой смене ${profile.limit} мин. Учитываются предшествующая работа, стоянка и следующее плечо.` : 'На этом рейсе промежуточная замена не запланирована',
+    size: 'машинист, помощник',
   };
   // локомотив
   const spec = LOCO_SPECS[loco.series] || { kw: 3000, massT: 138 };
@@ -170,7 +183,39 @@ function characteristics(service, uid, profile, e, st, h, loco, wagons, loaded) 
 }
 
 /** Все поезда сети в момент nowMs. */
-export function networkTrains(sim, nowMs, { exclude } = {}) {
+export function networkTrains(sim, nowMs, options = {}) {
+  const execution = options.ignorePlan ? null : executionPlans.get(sim);
+  if (!execution) return baseNetworkTrains(sim, nowMs, options);
+  const out = baseNetworkTrains(sim, nowMs, options).filter(t => !execution.ids.has(t.uid));
+  for (const row of execution.plan.optimized.rows) {
+    if (row.departedMs > nowMs || (row.status === 'assigned' && row.arrival < nowMs)) continue;
+    const service = execution.services.get(row.uid.slice(0, row.uid.lastIndexOf('@')));
+    if (!service) continue;
+    const assigned = row.status === 'assigned', waiting = !assigned || nowMs < row.departure;
+    const shifted = waiting ? row.departedMs + 1 : nowMs - (row.departure - row.departedMs);
+    const t = baseNetworkTrains(service, shifted).find(t => t.uid === row.uid);
+    if (!t) continue;
+    const offset = assigned ? row.departure - row.departedMs : 0;
+    t.scheduledDeparture = row.departedMs; t.locoId = row.locoId;
+    t.departedMs = assigned ? row.departure : null; t.arrivesMs = assigned ? row.arrival : null;
+    if (assigned) { t.loco.series = row.assignedSeries; t.loco.type = row.traction === 'diesel' ? 'тепловоз' : 'электровоз'; }
+    else t.loco = { ...t.loco, series: 'Не назначен', type: 'нет тяги', kw: 0, massT: 0 };
+    t.extraMin += offset / 60000;
+    if (waiting) {
+      Object.assign(t, { waitingDeparture: true, stopped: true, planned: false, station: row.from, km: 0, progress: 0, speedKmh: 0,
+        reason: assigned ? `Ожидание отправления по плану: ${row.reason}` : row.reason,
+        waitedMin: (nowMs - row.departedMs) / 60000, delayMin: Math.floor((nowMs - row.departedMs) / 60000),
+        restMin: assigned ? Math.ceil((row.departure - nowMs) / 60000) : 0 });
+      const route = service.services[0].route, pos = locate(route, row.dir === 'fwd' ? 0 : route.km);
+      t.lat = pos.lat; t.lon = pos.lon;
+      t.crew = { ...t.crew, assignmentPending: true, changeReason: 'Явка бригады для ожидающего состава ещё не назначена' };
+    }
+    if (!options.exclude?.(t.lat, t.lon)) out.push(t);
+  }
+  return out;
+}
+
+function baseNetworkTrains(sim, nowMs, { exclude } = {}) {
   const t = nowMs / 60000 + TZ;
   const out = [];
   for (const s of sim.services) {
@@ -195,7 +240,7 @@ export function networkTrains(sim, nowMs, { exclude } = {}) {
         uid, number, category: s.cat, label: CATEGORIES[s.cat].label, routeId: s.route.id, route: s.route.name, from, to, dir: s.dir,
         km: Math.round(st.km * 10) / 10, totalKm: s.route.km, progress: st.km / s.route.km, lat: pos.lat, lon: pos.lon, heading,
         speedKmh: Math.round(st.speed), stopped: st.stopped, planned: Boolean(st.stopped && st.planned), reason: st.stopped ? st.reason : '', station: st.stopped ? st.station : '',
-        restMin: st.stopped ? Math.round(st.restMin) : 0, delayMin: delayNow, extraMin: profile.extra,
+        restMin: st.stopped ? Math.round(st.restMin) : 0, waitedMin: st.stopped ? st.waitedMin : 0, delayMin: delayNow, extraMin: profile.extra,
         departedMs: (dep - TZ) * 60000, arrivesMs: Math.round((dep - TZ + profile.total) * 60000),
         ...(() => { const lc = locoOf(s.cat, s.route, h), wg = s.cat === 'passenger' ? 8 + (h % 9) : 45 + (h % 25), ch = characteristics(s, uid, profile, e, st, h, lc, wg, loaded); return { loco: ch.loco, wagons: wg, crew: ch.crew, consist: ch.consist }; })(),
         cargo: s.cat === 'container' ? 'контейнеры' : s.cat === 'freight' ? CARGO[h % CARGO.length] : null, loaded,
@@ -211,8 +256,9 @@ export function networkItinerary(sim, train) {
   const service = sim.services.find(s => s.id === train.uid.slice(0, sep));
   if (!service) return [];
   const profile = profileOf(service, train.uid);
+  if (train.departedMs === null) return [{ name: train.from, km: 0, arrival: train.scheduledDeparture, departure: null, reason: train.reason, planned: false }];
   return [
-    { name: train.from, km: 0, arrival: train.departedMs, departure: train.departedMs, reason: 'отправление', planned: true },
+    { name: train.from, km: 0, arrival: train.waitingDeparture ? train.scheduledDeparture : train.departedMs, departure: train.departedMs, reason: train.waitingDeparture ? train.reason : 'отправление', planned: !train.waitingDeparture },
     ...profile.legs.map(leg => ({ name: leg.name, km: leg.km, track: leg.track,
       arrival: Math.round(train.departedMs + leg.t * 60000), departure: Math.round(train.departedMs + (leg.t + leg.dwell) * 60000),
       reason: leg.reason, planned: leg.planned, crew: Boolean(leg.crew) })),
@@ -253,7 +299,7 @@ export function networkStats(trains) {
     moving: moving.length, stopped: stopped.length, forced: forced.length, delayed: trains.filter(t => t.delayMin >= 15).length,
     avgSpeed: moving.length ? Math.round(moving.reduce((n, t) => n + t.speedKmh, 0) / moving.length) : 0,
     wagons: trains.reduce((n, t) => n + t.wagons, 0),
-    passengers: trains.filter(t => t.category === 'passenger').reduce((n, t) => n + t.wagons * 52, 0),
+    passengers: trains.filter(t => t.category === 'passenger').reduce((n, t) => n + Math.round(t.wagons * 52 * t.consist.loadPct / 100), 0),
   };
 }
 
@@ -264,6 +310,24 @@ const eventMemo = new WeakMap();
 // Build a minute ahead; reveal each event at its exact model timestamp.
 // Repeated UI frames only filter the cached schedule, never rebuild the network.
 export function networkEvents(sim, nowMs, windowMin = 360) {
+  const execution = executionPlans.get(sim);
+  if (!execution) return baseNetworkEvents(sim, nowMs, windowMin);
+  const from = nowMs - windowMin * 60000;
+  const events = baseNetworkEvents(sim, nowMs, windowMin).filter(e => !execution.ids.has(e.uid));
+  for (const row of execution.plan.optimized.rows) {
+    if (row.departedMs > nowMs || (row.status === 'assigned' && row.arrival < from)) continue;
+    const service = execution.services.get(row.uid.slice(0, row.uid.lastIndexOf('@')));
+    if (!service || row.status !== 'assigned') continue;
+    const delta = row.departure - row.departedMs;
+    for (const e of baseNetworkEvents(service, nowMs - delta, windowMin)) if (e.uid === row.uid) {
+      const at = e.at + delta;
+      events.push({ ...e, at, id: `${e.uid}:${e.kind}:${at}:${e.station}`, locoId: row.locoId, scheduleApplied: true });
+    }
+  }
+  return events.sort((a, b) => b.at - a.at);
+}
+
+function baseNetworkEvents(sim, nowMs, windowMin = 360) {
   const slot = Math.floor(nowMs / 60000);
   let windows = eventMemo.get(sim);
   if (!windows) { windows = new Map(); eventMemo.set(sim, windows); }
@@ -315,7 +379,7 @@ function buildNetworkEvents(sim, nowMs, windowMin = 360) {
           push(leg.t, 'accept', st.name, `Принят №${number} на станцию ${st.name}, ${track}: плановая стоянка ${leg.dwell} мин`, false, { dwell: leg.dwell });
           if (leg.crew) {
             const h = Math.floor(leg.workedMin / 60), m = leg.workedMin % 60;
-            push(leg.t + 4, 'crew', st.name, `Смена локомотивной бригады №${number} на ${st.name}: прежняя отработала ${h} ч ${m} мин, уходит на отдых (12 ч), новая приняла поезд`, false, { workedMin: leg.workedMin, savedMin: 31, savedWeighted: 31 * WEIGHT[s.cat], calculation: `45 мин вынужденной замены − 14 мин плановой = 31 мин; 31 × ${WEIGHT[s.cat]} = ${31 * WEIGHT[s.cat]} взвешенных мин` });
+            push(leg.t + leg.dwell, 'crew', st.name, `Смена бригады поезда №${number} на ${st.name}: до прибытия отработано ${h} ч ${m} мин. Без замены к ${leg.nextStation} получится ${leg.projectedMin} мин при плановой смене ${profile.limit} мин. Приёмка новой бригадой завершена; отдых прежней определяется её графиком.`, false, { workedMin: leg.workedMin, projectedMin: leg.projectedMin, limitMin: profile.limit });
           }
           push(leg.t + leg.dwell, 'send', st.name, `Отправлен №${number} со станции ${st.name}${leg.crew ? ' после смены бригады' : ''}: путь свободен`);
         } else {

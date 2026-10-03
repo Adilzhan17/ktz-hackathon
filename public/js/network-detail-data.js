@@ -24,6 +24,10 @@ export function stationBoard(sim, station, trains, now) {
   const present = [], arrivals = [], nearby = [];
   for (const t of trains) {
     if (t.routeId !== station.routeId && !station.routeIds?.includes(t.routeId)) continue;
+    if (t.waitingDeparture && sameStation(t.station, station.name)) {
+      present.push({ t, stop: { name: station.name, arrival: t.scheduledDeparture, departure: t.departedMs, reason: t.reason } });
+      continue;
+    }
     const km = t.dir === 'fwd' ? t.km : t.totalKm - t.km;
     const distance = Math.abs(km - station.km);
     if (t.routeId === station.routeId && distance <= 60) nearby.push({ t, distance });
@@ -40,6 +44,7 @@ export function stationBoard(sim, station, trains, now) {
 }
 
 export function stopExplanation(t) {
+  if (t.waitingDeparture) return t.departedMs === null ? 'Нет совместимого свободного локомотива. Состав остаётся на станции; назначение повторно проверяется при продлении плана.' : 'Состав ожидает назначенный локомотив и свой слот отправления. Время плана управляет движением на карте.';
   if (!t.stopped) return 'Следует по маршруту. Следующая операция и её время показаны в прогнозе остановок.';
   if (t.crew.changing) return 'Идёт смена локомотивной бригады. После завершения стоянки рейс продолжится автоматически.';
   if (t.planned) return 'Остановка предусмотрена модельным расписанием. Поезд продолжит движение после окончания стоянки.';

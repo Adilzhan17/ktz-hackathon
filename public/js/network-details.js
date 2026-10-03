@@ -5,12 +5,12 @@ import { TrainSpecs } from './train-specs.js';
 import { networkEvents, networkItinerary } from './network-sim.js';
 import { stationBoard, sameStation, stopExplanation } from './network-detail-data.js';
 
-const stamp = n => `${dateShort(n)} ${time(n)}`;
+const stamp = n => n == null ? 'Не назначено' : `${dateShort(n)} ${time(n)}`;
 const minutes = ms => `${Math.max(0, Math.ceil(ms / 60000))} мин`;
 const source = 'Оперативный паспорт · состояние и прогноз обновляются по времени модели.';
 
 export function TrainDetails({ sim, t, now, onMap }) {
-  const stops = useMemo(() => networkItinerary(sim, t), [sim, t.uid]);
+  const stops = useMemo(() => networkItinerary(sim, t), [sim, t.uid, t.departedMs, t.arrivesMs, t.waitingDeparture]);
   const events = networkEvents(sim, now, 1440).filter(e => e.uid === t.uid).slice(0, 12);
   return html`<div class="network-details">
     <p class="detail-source">${source}</p>
@@ -18,13 +18,13 @@ export function TrainDetails({ sim, t, now, onMap }) {
       <${Badge} tone=${t.stopped && !t.planned ? 'danger' : 'accent'}>${t.stopped ? t.planned ? 'Плановая стоянка' : 'Вынужденная стоянка' : 'В движении'}</${Badge}>
       <h3>${t.stopped ? `${t.station}: ${t.reason}` : `${t.from} → ${t.to}`}</h3>
       <p>${stopExplanation(t)}</p>
-      ${t.stopped && html`<p>Продолжение движения через ≈ ${t.restMin} мин. ${t.delayMin ? `Вынужденное ожидание уже ${t.delayMin} мин.` : ''}</p>`}
+      ${t.stopped && html`<p>${t.departedMs === null ? 'Время отправления пока не определено.' : `Продолжение движения через ≈ ${t.restMin} мин.`} ${t.delayMin ? `Вынужденное ожидание уже ${t.delayMin} мин.` : ''}</p>`}
       <${Button} size="sm" icon="map-pin" onClick=${onMap}>Показать на карте</${Button}>
     </div>
     <div class="journey-progress"><span>Пройдено ${Math.round(t.progress * 100)}% · осталось ${Math.max(0, Math.round(t.totalKm - t.km))} км</span><progress max="1" value=${t.progress} aria-label="Пройденная часть маршрута" /></div>
     <dl class="detail-grid">
       <div><dt>Отправление</dt><dd>${stamp(t.departedMs)}</dd></div><div><dt>Прогноз прибытия</dt><dd>${stamp(t.arrivesMs)}</dd></div>
-      <div><dt>До конечной</dt><dd>${minutes(t.arrivesMs - now)}</dd></div><div><dt>Доп. ожидание в профиле рейса</dt><dd>${t.extraMin} мин (не текущее опоздание)</dd></div>
+      <div><dt>До конечной</dt><dd>${t.arrivesMs === null ? 'Ожидает назначения' : minutes(t.arrivesMs - now)}</dd></div><div><dt>Доп. ожидание в профиле рейса</dt><dd>${Math.round(t.extraMin)} мин (не текущее опоздание)</dd></div>
       <div><dt>Расчётные координаты</dt><dd>${t.lat.toFixed(5)}, ${t.lon.toFixed(5)}</dd></div><div><dt>Направление</dt><dd>${t.dir === 'fwd' ? 'Прямое' : 'Обратное'} · курс ${Math.round(t.heading)}°</dd></div>
     </dl>
     <${TrainSpecs} t=${t} />

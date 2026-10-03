@@ -2,13 +2,16 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { useLiveNow } from './store.js';
 import { useNetwork } from './geo-network.js';
-import { prepare, networkTrains, networkStats } from './network-sim.js';
+import { prepare, networkTrains, networkStats, setNetworkPlan } from './network-sim.js';
+import { useLiveSchedule } from './schedule-live.js';
 import { buildStationIndex } from './network-detail-data.js';
 
 let simLoading;
 export function useSim() {
+  const live = useLiveSchedule();
   const [sim, setSim] = useState(null);
   useEffect(() => { simLoading ||= fetch('/data/kz-routes.json').then(r => r.json()).then(prepare); simLoading.then(setSim).catch(() => setSim({ error: true })); }, []);
+  if (sim && !sim.error) setNetworkPlan(sim, live.plan);
   return sim;
 }
 

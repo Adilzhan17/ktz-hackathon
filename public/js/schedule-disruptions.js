@@ -11,8 +11,11 @@ export function extendSchedule(sim, plan, now) {
       const last = variant.rows.filter(r => r.locoId === l.id).sort((a, b) => a.arrival - b.arrival).at(-1);
       return last ? { ...l, station: last.to, ready: last.arrival + plan.config.turnaroundMin * 60000 } : { ...l };
     });
-    const extra = allocateTrips(trips, fleet, plan.config, optimized, plan.constraints || [], variant.rows);
-    const rows = [...variant.rows, ...extra.rows], assigned = rows.filter(r => r.status === 'assigned');
+    for (const l of fleet) l.ready = Math.max(now, l.ready);
+    const pending = variant.rows.filter(r => r.status !== 'assigned');
+    const retained = variant.rows.filter(r => r.status === 'assigned');
+    const extra = allocateTrips([...pending, ...trips], fleet, plan.config, optimized, plan.constraints || [], retained);
+    const rows = [...retained, ...extra.rows], assigned = rows.filter(r => r.status === 'assigned');
     return { rows, assigned: assigned.length, unassigned: rows.length - assigned.length,
       waitMin: assigned.reduce((n, r) => n + r.waitMin, 0), weightedWait: assigned.reduce((n, r) => n + r.waitMin * ({ passenger: 10, container: 2, freight: 1 }[r.category]), 0), locosUsed: new Set(assigned.map(r => r.locoId)).size };
   };
@@ -65,7 +68,10 @@ export function replanLocally(plan, incident, now, baselinePass = false) {
     return old.departure !== r.departure || old.locoId !== r.locoId || old.status !== r.status;
   }).map(r => { const old = before.find(b => b.uid === r.uid); return { uid: r.uid, number: r.number, routeId: r.routeId,
     oldDeparture: old.departure ?? null, departure: r.departure ?? null, oldLoco: old.locoId, locoId: r.locoId,
-    reason: incident.reason, deltaMin: r.departure && old.departure ? (r.departure - old.departure) / 60000 : null }; });
+    oldArrival: old.arrival ?? null, arrival: r.arrival ?? null, wagons: r.wagons,
+    reason: incident.reason, deltaMin: r.departure && old.departure ? (r.departure - old.departure) / 60000 : null,
+    wagonHoursDelta: r.departure && old.departure ? (r.departure - old.departure) / 3600000 * r.wagons : null,
+    search: r.search }; });
   const assigned = rows.filter(r => r.status === 'assigned');
   const baseline = !baselinePass && plan.baseline ? replanLocally({ ...plan, optimized: plan.baseline }, incident, now, true).optimized : plan.baseline;
   return { ...plan, baseline, constraints, revision: (plan.revision || 0) + 1, updatedAt: now,

@@ -13,7 +13,9 @@ test('24h service changes only connected rotations and never assigns the service
   const plan = { fleet, config: SCHEDULE_DEFAULTS, optimized: { rows } };
   const next = replanLocally(plan, { id: 'service1', locoId: 'L1', from: now, until: now + 86400000, reason: 'Суточное обслуживание' }, now);
   assert.equal(next.optimized.rows[1], rows[1]);
-  assert.ok(next.optimized.rows[0].couplingAt >= now + 86400000);
+  assert.equal(next.optimized.rows[0].status, 'unassigned');
+  assert.ok(next.optimized.rows[0].proposedDeparture >= now + 86400000);
+  assert.equal(next.optimized.rows[0].departedMs, rows[0].departedMs);
   assert.equal(next.changes[0].changes.length, 1);
   assert.deepEqual(next.changes[0].routes, ['X']);
 });

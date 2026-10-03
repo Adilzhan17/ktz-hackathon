@@ -515,7 +515,7 @@ test('network lists: all trains, all stations, journal and model decisions have 
   await page.goto('/#/log');
   await expect.poll(async () => page.locator('.timeline li').count()).toBeGreaterThan(50);
   await page.getByRole('radio', { name: 'Смена бригады' }).click();
-  await expect(page.locator('.timeline li').first()).toContainText('Смена локомотивной бригады');
+  await expect(page.locator('.timeline li').first()).toContainText('Смена бригады поезда');
   await page.goto('/#/model');
   await expect(page.getByRole('heading', { name: 'Решения модели', level: 1 })).toBeVisible();
   await expect(page.locator('.model-card').first()).toContainText('Почему так');

@@ -5,12 +5,14 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { createState, snapshot, act, tick, advanceTime } from './model.js';
-import { prepare, networkTrains, networkDecisions, networkStats, networkItinerary } from '../public/js/network-sim.js';
+import { prepare, networkTrains, networkDecisions, networkStats, networkItinerary, setNetworkPlan } from '../public/js/network-sim.js';
+import { operationalMetrics, fleetStandingMetrics } from '../public/js/operational-metrics.js';
 import { NetworkArchive } from './network-archive.js';
 import { buildStationIndex, stationBoard } from '../public/js/network-detail-data.js';
 import { buildSchedule, scheduleEconomics } from '../public/js/schedule-engine.js';
 import { replanLocally, extendSchedule, SERVICE_TYPES } from '../public/js/schedule-disruptions.js';
 import { ECONOMIC_REFERENCE } from '../public/js/economic-reference.js';
+import { JournalPush } from './push.js';
 
 // KTZ_AUTOPLAY=0 — детерминированный режим для тестов: время стоит, события выключены, состояние не сохраняется.
 // Иначе модель живёт в реальном времени: расписание строится непрерывно, события случаются сами, состояние хранится на диске.
@@ -50,6 +52,9 @@ function save() {
   } catch (error) { console.error('Не удалось сохранить состояние:', error.message); }
 }
 let state = load();
+let journalPush;
+try { journalPush = new JournalPush(autoplay ? path.dirname(STATE_FILE) : null); }
+catch (error) { console.error('Push недоступен, приложение продолжает работу:', error.message); }
 const routeData = JSON.parse(readFileSync(new URL('../public/data/kz-routes.json', import.meta.url), 'utf8'));
 const stationData = JSON.parse(readFileSync(new URL('../public/data/kz-stations.json', import.meta.url), 'utf8'));
 const network = prepare(routeData);
@@ -57,20 +62,38 @@ let stationIndex;
 const SCHEDULE_FILE = path.join(path.dirname(STATE_FILE), 'network-schedule.json');
 let savedSchedule = { plan: null };
 const scheduleClients = new Set();
+function sendStream(set, message) {
+  for (const res of set) {
+    if (res.destroyed || res.writableEnded) { set.delete(res); continue; }
+    if (res.writableLength > 8 * 1024 * 1024) { set.delete(res); res.end(); continue; }
+    res.write(message);
+  }
+}
+function registerStream(set, req, res) {
+  set.add(res);
+  const remove = () => set.delete(res);
+  req.on('close', remove); res.on('close', remove); res.on('error', remove);
+}
 if (autoplay && existsSync(SCHEDULE_FILE)) {
   try { savedSchedule = JSON.parse(readFileSync(SCHEDULE_FILE, 'utf8')); }
   catch (error) { console.error('Не удалось прочитать расписание:', error); savedSchedule = { plan: null, error: 'Сохранённый план не удалось прочитать. Исходный файл сохранён.' }; }
 }
 function persistSchedule() {
+  setNetworkPlan(network, savedSchedule.plan);
   if (autoplay) { mkdirSync(path.dirname(SCHEDULE_FILE), { recursive: true }); writeFileSync(`${SCHEDULE_FILE}.tmp`, JSON.stringify(savedSchedule)); renameSync(`${SCHEDULE_FILE}.tmp`, SCHEDULE_FILE); }
   const message = `event: schedule\ndata: ${JSON.stringify(savedSchedule)}\n\n`;
-  for (const res of scheduleClients) if (!res.write(message)) res.end();
+  sendStream(scheduleClients, message);
 }
-if (!savedSchedule.plan) {
+if (savedSchedule.plan && savedSchedule.plan.version < 3 && autoplay) {
+  const backup = `${SCHEDULE_FILE}.before-execution-v2.json`;
+  if (!existsSync(backup)) writeFileSync(backup, JSON.stringify(savedSchedule));
+}
+if (!savedSchedule.plan || savedSchedule.plan.version < 3) {
   const plan = buildSchedule(network, state.now);
   savedSchedule = { plan, auto: true, rates: { ...ECONOMIC_REFERENCE }, savedAt: Date.now() };
   persistSchedule();
 }
+setNetworkPlan(network, savedSchedule.plan);
 function applyScheduleIncident(incident) {
   if (savedSchedule.plan.constraints?.some(c => c.id === incident.id)) return;
   const plan = replanLocally(savedSchedule.plan, incident, state.now);
@@ -83,14 +106,16 @@ catch (error) { console.error('Архив сети недоступен (дви�
 const networkClients = new Set();
 function archiveTick() {
   if (!archive) return;
+  const through = archive.through;
   const events = archive.advance(state.now);
+  journalPush?.enqueue(events.filter(e => e.at > through));
   for (const e of events) if (e.kind === 'repair' && e.dwell > 0 && e.at + e.dwell * 60000 > state.now) {
-    const locoId = `active:${e.uid}`;
+    const locoId = e.locoId || `active:${e.uid}`;
     if (savedSchedule.plan.fleet.some(l => l.id === locoId)) applyScheduleIncident({ id: e.id, locoId, from: e.at, until: e.at + e.dwell * 60000, reason: `Неисправность №${e.number}: ${e.station}` });
   }
   if (events.length) {
     const message = `event: batch\ndata: ${JSON.stringify({ events, through: state.now })}\n\n`;
-    for (const res of networkClients) if (!res.write(message)) res.end();
+    sendStream(networkClients, message);
   }
 }
 const clients = new Set();
@@ -98,7 +123,7 @@ const publicRoot = new URL('../public/', import.meta.url);
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '127.0.0.1';
 const publicDir = fileURLToPath(publicRoot);
-const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.ico': 'image/x-icon' };
+const mime = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.ico': 'image/x-icon' };
 const longCache = new Set(['.woff2', '.png']);
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -131,10 +156,20 @@ const timer = setInterval(() => {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
+    if (req.method === 'GET' && url.pathname === '/api/push/config') return json(res, journalPush ? 200 : 503, journalPush ? { publicKey: journalPush.data.vapid.publicKey } : { error: 'Push недоступен' });
+    if (req.method === 'POST' && ['/api/push/subscribe', '/api/push/unsubscribe'].includes(url.pathname)) {
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });
+      if (!journalPush) return json(res, 503, { error: 'Push недоступен' });
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 8192) return json(res, 413, { error: 'Слишком большой запрос' }); }
+      const input = JSON.parse(body);
+      if (url.pathname.endsWith('/unsubscribe')) journalPush.remove(input); else journalPush.add(input);
+      return json(res, 200, { ok: true });
+    }
     if (req.method === 'GET' && url.pathname === '/api/schedule-events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.write(`event: schedule\ndata: ${JSON.stringify(savedSchedule)}\n\n`);
-      scheduleClients.add(res); req.on('close', () => scheduleClients.delete(res)); return;
+      registerStream(scheduleClients, req, res); return;
     }
     if (req.method === 'POST' && url.pathname === '/api/schedule-incident') {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });
@@ -154,7 +189,9 @@ const server = http.createServer(async (req, res) => {
       const input = JSON.parse(body);
       if (!Number.isFinite(input.createdAt) || input.createdAt > state.now + 2000 || input.createdAt < state.now - 7 * 86400000) return json(res, 400, { error: 'Пересчитайте план на актуальное время' });
       if (input.routeId !== 'all' && !network.byId.has(input.routeId)) return json(res, 400, { error: 'Неизвестный маршрут' });
-      const plan = buildSchedule(network, input.createdAt, input.config, input.routeId);
+      // Do not recreate physical locomotives or move already departed trains when saving a preview.
+      if (savedSchedule.plan?.executionEnabled && (JSON.stringify(input.config) !== JSON.stringify(savedSchedule.plan.config) || input.routeId !== savedSchedule.plan.routeId)) return json(res, 409, { error: 'Действующее расписание уже исполняется. Изменение пула и параметров требует нового согласованного плана; используйте локальные события. Тарифы можно сохранить отдельно без изменения параметров.' });
+      const plan = savedSchedule.plan?.executionEnabled ? savedSchedule.plan : buildSchedule(network, input.createdAt, input.config, input.routeId);
       const economics = scheduleEconomics(plan, input.rates);
       const next = { savedAt: Date.now(), plan, rates: economics.rates, economics };
       if (autoplay) { mkdirSync(path.dirname(SCHEDULE_FILE), { recursive: true }); writeFileSync(`${SCHEDULE_FILE}.tmp`, JSON.stringify(next)); renameSync(`${SCHEDULE_FILE}.tmp`, SCHEDULE_FILE); }
@@ -166,7 +203,7 @@ const server = http.createServer(async (req, res) => {
       if (!archive) return json(res, 503, { error: 'Архив сети недоступен' });
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
       res.write(`event: archive\ndata: ${JSON.stringify(archive.snapshot(Infinity))}\n\n`);
-      networkClients.add(res); req.on('close', () => networkClients.delete(res)); return;
+      registerStream(networkClients, req, res); return;
     }
     if (req.method === 'GET' && url.pathname === '/api/network-export') {
       if (!archive) return json(res, 503, { error: 'Архив сети недоступен' });
@@ -181,7 +218,7 @@ const server = http.createServer(async (req, res) => {
         stationIndex ||= buildStationIndex(network, stationData);
         data.stations = { source: stationData, operational: stationIndex.map(r => ({ ...r, ...stationBoard(network, r, trains, now) })) };
       }
-      if (has('model')) data.model = { routes: routeData, services: network.services, statistics: networkStats(trains), dispatcher: snapshot(state), schedule: savedSchedule };
+      if (has('model')) data.model = { routes: routeData, services: network.services, statistics: networkStats(trains), operationalMetrics: operationalMetrics(trains, archive.snapshot(now).events), fleetStanding: fleetStandingMetrics(savedSchedule.plan), dispatcher: snapshot(state), schedule: savedSchedule };
       if (has('decisions')) data.decisions = { current: networkDecisions(trains), history: archive.snapshot(now).events };
       if (has('journal')) data.journal = archive.snapshot(now);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="ktz-${section}.json"` });
@@ -191,7 +228,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       res.write(`data: ${JSON.stringify(snapshot(state))}\n\n`);
-      clients.add(res); req.on('close', () => clients.delete(res)); return;
+      registerStream(clients, req, res); return;
     }
     if (req.method === 'POST' && url.pathname === '/api/action') {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });

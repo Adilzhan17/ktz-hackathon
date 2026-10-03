@@ -7,6 +7,7 @@ import { SCHEDULE_DEFAULTS, ENERGY_DEFAULTS, buildSchedule, scheduleEconomics } 
 import { useLiveSchedule } from './schedule-live.js';
 import { ScheduleChanges, ScheduleVisual, MaintenanceControls } from './schedule-visual.js';
 import { ECONOMIC_REFERENCE, ECONOMIC_SOURCES } from './economic-reference.js';
+import { ScheduleExplanation } from './schedule-explanation.js';
 
 const fmt = n => Math.round(n).toLocaleString('ru-RU');
 const stamp = n => `${dateShort(n)} ${time(n)}`;
@@ -14,12 +15,17 @@ const numberFields = [
   ['reserve', 'Резерв на станцию / вид тяги', 0, 10], ['turnaroundMin', 'Оборот после рейса, мин', 0, 240],
   ['couplingMin', 'Прицепка и подготовка, мин', 1, 120], ['headwayMin', 'Интервал отправлений, мин', 1, 60],
   ['maxFreightT', 'Предел массы грузового, т', 100, 20000], ['maxPassengerT', 'Предел массы пассажирского, т', 100, 5000],
+  ['maxShiftMin', 'Максимальный автосдвиг грузового, мин', 0, 120],
 ];
 const rateFields = [
   ['dieselLitresH', 'Дизель на стоянке, л/ч'], ['electricKwhH', 'Электроэнергия на стоянке, кВт·ч/ч'],
   ['dieselPrice', 'Дизель, ₸/л'], ['electricPrice', 'Электроэнергия, ₸/кВт·ч'],
   ['locoHour', 'Локомотиво-час без энергии, ₸/ч'], ['wagonHour', 'Вагоно-час без энергии, ₸/ч'],
 ];
+function AssignmentReason({ row, baseline, plan }) {
+  const [open, setOpen] = useState(false);
+  return html`<details onToggle=${e => setOpen(e.currentTarget.open)}><summary>Почему это назначение</summary>${open && html`<${ScheduleExplanation} row=${row} baseline=${baseline} plan=${plan} />`}</details>`;
+}
 
 export function SchedulesPage() {
   const { sim, now, failed } = useNetworkTrains(1);
@@ -60,7 +66,8 @@ export function SchedulesPage() {
     ...(plan?.[view]?.rows || []).map(r => [r.uid, r.number, r.route, r.from, r.to, r.wagons, r.consist.grossT, new Date(r.departedMs).toISOString(), r.departure ? new Date(r.departure).toISOString() : '', r.arrival ? new Date(r.arrival).toISOString() : '', r.locoId, r.assignedSeries, r.waitMin, r.reason])]);
   return html`<${PageHeader} title="Расписания" subtitle="Автосоставление плана рейсов, назначение тяги составам и расчёт оборота локомотивов"
     actions=${html`<${Button} icon="download" disabled=${!plan} onClick=${csv}>Расписание · CSV</${Button}><a class="btn btn-secondary" href="/api/schedule?download=1" download="ktz-schedule.json">Сохранённый план · JSON</a>`} />
-    <p class="feed-status"><span class="feed-dot live"></span>План создаётся сервером автоматически. Неисправности и назначенные работы запускают локальный пересчёт связанных оборотов.${live.failed ? ' Связь с планировщиком восстанавливается…' : ''}</p>
+    <p class="feed-status"><span class="feed-dot live"></span>План проверяется автоматически. Фиксированные слоты сохраняются; неисполнимые назначения требуют решения.${live.failed ? ' Связь с планировщиком восстанавливается…' : ''}</p>
+    ${plan?.optimized.unassigned > 0 && html`<p class="bad" role="status">План не готов к исполнению: ${plan.optimized.unassigned} рейсов не обеспечены тягой в допустимое время. Они не отменены и не перенесены автоматически на много часов. На графике показаны исходные слоты; отклонённые варианты доступны в разборе. Общая экономия такого плана не подтверждается.</p>`}
     ${plan && html`<${ScheduleVisual} plan=${plan} now=${now} /><${ScheduleChanges} plan=${plan} /><${MaintenanceControls} plan=${plan} />`}
     <section class="panel"><div class="panel-head"><div><h2>Параметры планирования</h2><small>Составы берутся из расписания сети. Локомотив появляется в следующем пункте только после прибытия и оборота.</small></div></div>
       <div class="tab-panel"><div class="filter-row"><${RouteSelect} sim=${sim} value=${route} onChange=${setRoute} /><${Segmented} label="Горизонт расписания" value=${config.horizonH} onChange=${horizonH => setConfig({ ...config, horizonH })} options=${[6, 12, 24].map(value => ({ value, label: `${value} часов` }))} /></div>
@@ -79,11 +86,11 @@ export function SchedulesPage() {
         <div class="detail-grid">${rateFields.map(([key, label]) => html`<label class="schedule-field" key=${key}><span>${label}</span><input type="number" min="0" max="10000000" step="any" value=${rates[key]} onInput=${e => setRates({ ...rates, [key]: e.target.value === '' ? NaN : Number(e.target.value) })} /></label>`)}</div>
         <p class="muted">Начальный расчёт заполнен по открытым ориентирам и явно указанным допущениям. Это сценарная оценка, не закупочные тарифы КТЖ. Для зимнего и арктического дизеля нужна цена соответствующей поставки. Нулевые статьи не оценены.</p>
         <details><summary>Источники цен и норм · проверено 03.10.2026</summary>${ECONOMIC_SOURCES.map(s => html`<p><strong>${s.label}.</strong> ${s.note} ${s.url && html`<a href=${s.url} target="_blank" rel="noopener">Источник</a>`}</p>`)}</details>
-        ${economics ? html`<div class="kpis kpis-tight"><${Kpi} label="Денежный эффект" value=${economics.ready ? fmt(economics.totalKzt) : 'Нужны нормы'} unit=${economics.ready ? ' ₸' : ''} note=${`По заполненным статьям: ${fmt(economics.totalKzt)} ₸`} />
+        ${economics ? html`<div class="kpis kpis-tight"><${Kpi} label="Денежный эффект" value=${economics.ready ? fmt(economics.totalKzt) : economics.completeComparison ? 'Нужны нормы' : 'Неполный план'} unit=${economics.ready ? ' ₸' : ''} note=${economics.completeComparison ? `По заполненным статьям: ${fmt(economics.totalKzt)} ₸` : 'Сначала обеспечить все рейсы; исключение рейсов не считается экономией'} />
           <${Kpi} label="Дизтопливо на стоянках" value=${rates.dieselLitresH ? fmt(economics.dieselLitres) : 'Нужна норма'} unit=${rates.dieselLitresH ? ' л' : ''} note=${`Изменение стоянки тяги ${fmt(economics.dieselHours)} ч`} />
           <${Kpi} label="Электроэнергия на стоянках" value=${rates.electricKwhH ? fmt(economics.electricKwh) : 'Нужна норма'} unit=${rates.electricKwhH ? ' кВт·ч' : ''} note=${`Изменение стоянки тяги ${fmt(economics.electricHours)} ч`} />
           <${Kpi} label="Сокращение ожидания вагонов" value=${fmt(economics.wagonHours)} unit=" ваг·ч" note=${`${economics.comparable} сопоставимых рейсов`} /></div>` : html`<p class="bad" role="alert">Проверьте нормы: требуются неотрицательные числа.</p>`}
-        <details><summary>Как считаются деньги и топливо</summary><p>Топливо = разница времени стоянки назначенных тепловозов × л/ч. Электричество = разница стоянки электровозов × кВт·ч/ч. Ожидание вагонов без локомотива не расходует топливо локомотива. Денежный эффект = энергия × цены + локомотиво-часы × ставка + вагоно-часы × ставка. Отрицательное значение показывает дополнительные расходы. Снижение расхода в движении этим расчётом не заявляется; режимы неиспользованного резерва требуют отдельных норм.</p></details>
+        <details><summary>Как считаются деньги и топливо</summary><p>Сравнивается весь доступный пул на одинаковом интервале, включая неназначенный резерв. Тепловозы на межрейсовой стоянке считаются заведёнными; электровозы питают собственные нужды. Перенос простоя между двумя локомотивами не создаёт экономии. Отрицательное значение — дополнительные расходы. При необеспеченных рейсах общий эффект не подтверждается. Расход в движении и ремонте отдельно не оценён.</p></details>
         </div></section>
       <section class="panel"><div class="panel-head"><div><h2>Рейсы и назначения</h2><small>${plan.note}</small></div></div><div class="toolbar"><${Segmented} label="Вариант расписания" value=${view} onChange=${setView} options=${[{ value: 'optimized', label: 'Подобранная тяга' }, { value: 'baseline', label: 'Базовая очередь' }]} /><input type="search" aria-label="Поиск в расписании" placeholder="Поезд, станция, локомотив" value=${query} onInput=${e => { setQuery(e.target.value); setLimit(60); }} /></div>
       <div class="table-wrap"><table class="table responsive"><thead><tr><th>Поезд / состав</th><th>Маршрут</th><th>График → план</th><th>Локомотив</th><th>Ожидание</th><th>Обоснование</th></tr></thead><tbody>${rows.slice(0, limit).map(r => html`<tr key=${r.uid}>
@@ -92,8 +99,8 @@ export function SchedulesPage() {
         <td data-label="Время">${stamp(r.departedMs)} → ${r.departure ? stamp(r.departure) : 'не назначено'}${r.arrival && html`<div>Прибытие ${stamp(r.arrival)}</div>`}</td>
         <td data-label="Тяга">${r.assignedSeries || 'Нет подходящей'}${r.locoId && html`<details><summary>Оборот локомотива</summary><small>${r.locoId}</small><p>Готов ${stamp(r.locoReady)} · прицепка ${stamp(r.couplingAt)} · освобождение ${stamp(r.arrival + plan.config.turnaroundMin * 60000)}</p></details>`}</td>
         <td data-label="Ожидание"><${Badge} tone=${r.status === 'unassigned' ? 'danger' : r.waitMin > 0 ? 'neutral' : 'accent'}>${r.status === 'unassigned' ? 'Не обеспечен' : `${fmt(r.waitMin)} мин`}</${Badge}></td>
-        <td data-label="Почему"><details><summary>Почему это назначение</summary><p>${r.reason}</p><p>${r.departure && r.departure < now ? 'Плановое время отправления наступило; исполнение проверяется отдельно.' : 'Предстоящее назначение.'}</p></details></td>
+        <td data-label="Почему"><${AssignmentReason} row=${r} baseline=${plan.baseline.rows.find(b => b.uid === r.uid)} plan=${plan} /></td>
       </tr>`)}</tbody></table></div><div class="table-foot">${Math.min(limit, rows.length)} из ${rows.length}${rows.length > limit && html`<${Button} onClick=${() => setLimit(limit + 60)}>Показать ещё</${Button}>`}</div></section>
-      <p class="note">План назначений сохраняется отдельно и не переписывает движение уже идущих поездов. Перед исполнением необходима проверка путей, СЦБ, профиля тяги, ТО и допусков бригад; они не сводятся к одному интервалу отправления.</p>`}
+      <p class="note">Автоматическое исполнение нового плана не включено: сначала должны быть обеспечены все рейсы и проверены ограничения. Исходное расписание сети продолжает действовать. Пути, СЦБ, профиль тяги и допуски бригад требуют дополнительной проверки.</p>`}
   `;
 }

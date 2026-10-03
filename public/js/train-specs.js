@@ -12,13 +12,14 @@ export function TrainSpecs({ t }) {
       <${Fact} icon="route" label="Маршрут" value=${`${t.from} → ${t.to}`} />
       <${Fact} icon="ruler" label="Пройдено" value=${`${Math.round(t.km)} из ${Math.round(t.totalKm)} км`} />
       <${Fact} icon="gauge" label="Скорость" value=${`${t.speedKmh} км/ч (допустимая ${loco.maxKmh})`} />
-      <${Fact} icon="clock" label="Прибытие" value=${`${time(t.arrivesMs)}${t.extraMin ? ` · задержка до ${t.extraMin} мин` : ''}`} /></div></section>
+      <${Fact} icon="clock" label="Прибытие" value=${t.arrivesMs === null ? 'Ожидает назначения тяги' : `${time(t.arrivesMs)}${t.extraMin ? ` · задержка до ${Math.round(t.extraMin)} мин` : ''}`} /></div></section>
     <section aria-label="Бригада"><h4>Локомотивная бригада №${crew.number}</h4><div class="facts">
       <${Fact} icon="user-round" label="Состав бригады" value=${crew.size} />
-      <${Fact} icon="timer" label="Отработано" value=${`${hm(crew.workedMin)} из ${hm(crew.limitMin)}`} />
+      <${Fact} icon="timer" label="Отработано" value=${crew.assignmentPending ? 'Бригада ещё не назначена на отправление' : `${hm(crew.workedMin)} из ${hm(crew.limitMin)}`} />
       <${Fact} icon="hourglass" label="До смены" value=${crew.changing ? 'смена идёт сейчас' : hm(crew.leftMin)} bad=${crewSoon} />
       <${Fact} icon="map-pin" label="Смена на станции" value=${crew.nextChange} />
-      <${Fact} icon="users" label="После смены" value=${`отдых ${crew.restAfterH} ч`} /></div></section>
+      <${Fact} icon="users" label="После смены" value=${crew.restReason} />
+      <${Fact} icon="info" label="Почему меняется" value=${crew.changeReason} /></div></section>
     <section aria-label="Локомотив"><h4>Локомотив ${loco.series}</h4><div class="facts">
       <${Fact} icon="truck" label="Тип и мощность" value=${`${loco.type}, ${loco.kw.toLocaleString('ru-RU')} кВт`} />
       <${Fact} icon="weight" label="Масса локомотива" value=${`${loco.massT} т`} />

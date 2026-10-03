@@ -15,5 +15,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
   }
 }

@@ -7,6 +7,7 @@ import { networkEvents, networkStats } from './network-sim.js';
 import { DECISION, EventFeed } from './log.js';
 import { useNetworkArchive } from './network-archive.js';
 import { ExportButton } from './network-export.js';
+import { OperationalStatistics } from './operational-statistics.js';
 
 const fmt = n => Math.round(n).toLocaleString('ru-RU');
 const hm = min => `${Math.floor(min / 60)} ч ${String(Math.round(min % 60)).padStart(2, '0')} мин`;
@@ -122,6 +123,7 @@ export function StatsPage() {
     ${archive.failed && html`<p role="status" class="bad">Нет связи с архивом. Итоги могут быть неполными до переподключения.</p>`}
     <section class="panel" id="statistics-history"><div class="panel-head"><div><h2>Все записи доступны для проверки</h2><small>Откройте историю: поезд, станция, операция, причина, расчёт эффекта. Отправления и приёмы тоже входят в общий счётчик.</small></div><${Button} onClick=${() => { setHistoryKind('all'); setShowHistory(!showHistory); }} aria-expanded=${showHistory}>${showHistory ? 'Скрыть историю' : 'Посмотреть все решения'}</${Button}></div>${showHistory && html`<${EventFeed} key=${`${historyKind}:${windowMin}`} initialKind=${historyKind} initialWindow=${windowMin} />`}</section>
     ${loading || archive.loading || !m ? html`<p class="muted pad">Расчёт статистики…</p>` : html`
+    <${OperationalStatistics} trains=${trains} events=${calc.events} />
     <section class="kpis" aria-label="Решения модели за период">
       <${Kpi} label="Решений за период" icon="list-checks" value=${fmt(m.total)} note=${`≈ ${fmt(m.total / m.hours)} в час`} />
       <${Kpi} label="Расчётная экономия" icon="timer-reset" tone="accent" value=${fmt(m.savedMin)} unit=" мин" note=${`взвешенная экономия ${fmt(m.savedW)}`} />
@@ -162,7 +164,7 @@ export function StatsPage() {
       <ul class="plain-list">
         <li>На линии <strong>${fmt(trains.length)}</strong> поездов; в выбранном периоде <strong>${fmt(m.total)}</strong> записей за ${Math.round(period / 60)} ч; расчёт ленты занял ${calc.ms} мс.</li>
         <li>Расписание строится по <strong>${fmt(sim.services.length)}</strong> регулярным службам на <strong>${sim.routes.length}</strong> маршрутах; положение каждого поезда определяется только временем, поэтому сеть не сбрасывается и продолжает работу после перезапуска.</li>
-        <li>Решение о смене бригады принимается заранее: если бригада не успеет дойти до следующей станции в пределах 5,5–7 ч работы, смена назначается на текущей.</li>
+        <li>Смена бригады планируется до длинного следующего плеча с учётом работы до рейса и стоянки. Плановая смена модели — 8 ч; индивидуальный график отдыха ещё не рассчитывается. Превышения видны в подробной статистике.</li>
         <li><strong>Как считается экономия.</strong> Пропуск приоритетного: избежанная задержка приоритетного поезда (12–25 мин) × вес его типа минус собственный простой × вес своего типа. Плановая смена бригады: 31 мин против вынужденной замены (в среднем 45 мин ожидания вместо 14 мин планово) × вес типа. Вес: пассажирский 10, контейнерный 2, грузовой 1. Это оценка модели, а не измерение на реальной сети.</li>
       </ul></section>`}`;
 }
