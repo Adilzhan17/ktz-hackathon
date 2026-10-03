@@ -5,11 +5,14 @@ import { Badge, Empty, Kpi, PageHeader } from './ui.js';
 import { useSim } from './network-data.js';
 import { useNetwork } from './geo-network.js';
 import { DECISION } from './log.js';
+import { MODEL_FACTORS, FACTOR_AUDIT_DATE } from './model-factors.js';
 import { STAGES, METRIC_CARDS } from './engine-graph.js';
 import { useEngine, HISTORY, CYCLES_PER_SECOND, percentile } from './engine-metrics.js';
-import { PipelineStrip, StageCard } from './engine-pipeline.js';
+import { FlowGraph } from './engine-flow.js';
+import { StageCard } from './engine-stages.js';
+import { FormulaBook } from './formula-view.js';
 import { EventTape } from './engine-tape.js';
-import { MetricCard, Bars, Heatmap, Characteristics, fmt } from './engine-widgets.js';
+import { MetricCard, Bars, Heatmap, Characteristics, Sparkline, fmt } from './engine-widgets.js';
 
 const KINDS = ['send', 'accept', 'crew', 'yield', 'hold', 'repair', 'resolved'];
 const Panel = ({ id, title, hint, actions, children, class: cls = '' }) => html`<section class=${`panel ${cls}`} aria-labelledby=${id}>
@@ -20,6 +23,7 @@ export function EnginePage() {
   const net = useNetwork();
   const { sample, samples, lines, counters, startedAt } = useEngine(sim);
   const [open, setOpen] = useState(null);
+  const [selected, setSelected] = useState(null);
   const window = Math.round(Math.min(HISTORY, samples.length) / CYCLES_PER_SECOND);
   const stats = useMemo(() => {
     const ms = samples.map(s => s.ms);
@@ -30,10 +34,11 @@ export function EnginePage() {
   if (!sample) return html`<${PageHeader} title="Модель" subtitle="Первый цикл расчёта…" />`;
   const ctx = { dailyTrips: sim.services.reduce((n, s) => n + s.n, 0), clock: time(sample.now) };
   const series = key => samples.map(s => s[key]);
+  const node = STAGES.flatMap(st => st.rows).find(r => r.id === selected);
   const throughput = sample.ms > 0 ? Math.round(sample.trains / (sample.ms / 1000)) : 0;
   const problem = (sample.byKind.hold || 0) + (sample.byKind.repair || 0) + (sample.byKind.yield || 0);
   const kindRows = KINDS.map(k => ({ label: DECISION[k].label, value: sample.byKind[k] || 0, tone: ['hold', 'repair'].includes(k) ? 'danger' : '' }));
-  return html`<${PageHeader} title="Модель" subtitle="Что модель получает, что считает и что выдаёт — прямо сейчас. Расчёт идёт непрерывно, 4 цикла в секунду"
+  return html`<${PageHeader} title="Модель" subtitle="Что модель получает, что считает и что выдаёт — прямо сейчас, полная формула и все переменные. Расчёт идёт непрерывно, 4 цикла в секунду"
       actions=${html`<${Badge} tone="accent" icon="radio">цикл ${fmt(counters.cycles)} · ${time(sample.now)}</${Badge}>`} />
     <section class="kpis" aria-label="Работа модели">
       <${Kpi} label="Цикл расчёта" icon="cpu" value=${sample.ms.toFixed(1)} unit=" мс" note=${`p95 ${stats.p95.toFixed(1)} мс · максимум ${stats.max.toFixed(1)} мс`} />
@@ -43,11 +48,11 @@ export function EnginePage() {
       <${Kpi} label="События на линии" icon="siren" tone=${sample.incidents ? 'danger' : 'neutral'} value=${sample.incidents} note=${sample.incidents ? `вариантов пропуска: ${sample.variantsCount}` : 'движение по графику'} />
       <${Kpi} label="Изменений на входе" icon="radio" value=${fmt(counters.inputs)} note="за сеанс: новые рейсы, остановки, бригады, события" />
     </section>
-    <${Panel} id="pl-h" title="Конвейер расчёта" hint="Этапы — станции, пачки данных — мини-поезда. Светофор показывает нагрузку этапа: зелёный до 30 мс, жёлтый до 80 мс, красный выше." class="engine-block">
-      <${PipelineStrip} sample=${sample} cycle=${counters.cycles} />
-      <ul class="pipeline-legend" aria-label="Условные обозначения">
-        <li><i class="lg-pk data"></i>Положения поездов</li><li><i class="lg-pk plan"></i>Очереди и конфликты</li><li><i class="lg-pk mute"></i>Подсказки диспетчеру</li><li><i class="lg-pk danger"></i>События диспетчера</li><li><i class="lg-pk small"></i>Изменения на входе</li>
-      </ul>
+    <${Panel} id="pl-h" title="Поток данных модели" hint="Слева данные на входе, справа результат. Точки бегут по связям, узлы вспыхивают, когда значение меняется. Нажмите на узел: подсветятся его связи и откроется формула." class="engine-block">
+      <${FlowGraph} sample=${sample} ctx=${ctx} selected=${selected} onSelect=${setSelected} cycle=${counters.cycles} />
+      ${node ? html`<div class="flow-detail"><div><strong>${node.label}</strong><p>${node.hint}</p><code>${node.formula}</code></div>
+        <div class="flow-spark"><b class="num">${node.numeric === false ? ctx.clock : `${fmt(node.value(sample, ctx))} ${node.unit}`}</b><${Sparkline} values=${samples.map(x => node.value(x, ctx)).filter(x => typeof x === 'number')} width=${220} height=${40} label=${`Динамика: ${node.label}`} /><small>последние ${window} с</small></div></div>`
+        : html`<p class="muted flow-hint">Выберите узел, чтобы увидеть, что он считает и по какой формуле.</p>`}
     </${Panel}>
     <div class="engine-grid">
       <div class="stage-grid">${STAGES.map((st, i) => html`<${StageCard} key=${st.id} stage=${st} index=${i} sample=${sample} ctx=${ctx} samples=${samples} openId=${open} onToggle=${setOpen} />`)}</div>
@@ -68,6 +73,9 @@ export function EnginePage() {
       </${Panel}>
       <${Panel} id="hm-h" title="Нагрузка на ближайшие 24 часа" hint="Отправления по 20 самым загруженным маршрутам, время Алматы"><${Heatmap} sim=${sim} now=${sample.now} /></${Panel}>
     </div>
+    <${Panel} id="fm-h" title="Полная формула модели" hint=${`Все уравнения и все переменные, ${MODEL_FACTORS.length} факторов проверены по коду ${FACTOR_AUDIT_DATE}`}>
+      <${FormulaBook} sample=${sample} ctx=${ctx} />
+    </${Panel}>
     <${Panel} id="ch-h" title="Характеристики модели" hint="Параметры, масштаб, правила и границы применимости">
       <${Characteristics} sim=${sim} stations=${net && !net.error ? net.net.stations.length + net.net.halts.length : 0} counters=${counters} startedAt=${startedAt} />
     </${Panel}>`;
