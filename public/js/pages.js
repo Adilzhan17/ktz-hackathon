@@ -8,6 +8,7 @@ import { TrackMap } from './trackmap.js';
 import { DispatcherPanel } from './panel.js';
 import { NetworkTrains, NetworkStations } from './network-lists.js';
 import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
+import { NetworkDispatcher } from './network-dispatcher.js';
 
 const stationName = (data, i) => data.stations[i].name;
 
@@ -22,7 +23,7 @@ export function Overview({ data }) {
   const serviced = data.trains.filter(t => t.techState.status === 'на ТО').length;
   const soon = data.trains.filter(t => t.techState.status === 'скоро ТО').length;
   const broken = data.trains.filter(t => t.broken).length;
-  return html`<${PageHeader} title="Оперативная обстановка"
+  return html`<${NetworkDispatcher} /><${PageHeader} title="Оперативная обстановка"
       subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
       actions=${html`<a class="btn btn-secondary" href=${href('/map')}><${Icon} name="map-pin" size=${17} />Карта участка</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
     <section class="panel map-panel" aria-labelledby="map-title">

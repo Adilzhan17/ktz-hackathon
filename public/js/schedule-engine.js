@@ -50,7 +50,7 @@ export function allocateTrips(trips, fleet, config, optimized = true, constraint
       for (let pass = 0; pass <= constraints.length + fixed.length; pass++) {
         let changed = false;
         for (const c of constraints) {
-          const applies = c.locoId ? c.locoId === l.id : c.routeId === t.routeId;
+          const applies = c.locoId ? c.locoId === l.id : c.routeId === t.routeId && (!c.dir || c.dir === 'all' || c.dir === t.dir);
           if (applies && dep + t.arrivesMs - t.departedMs > c.from && dep - config.couplingMin * 60000 < c.until) {
             dep = c.until + (c.locoId ? config.couplingMin * 60000 : 0); changed = true;
           }

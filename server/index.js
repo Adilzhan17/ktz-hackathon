@@ -181,6 +181,16 @@ const server = http.createServer(async (req, res) => {
       applyScheduleIncident({ id: `service:${from}:${input.locoId}:${input.service}`, locoId: input.locoId, from, until: from + service.minutes * 60000, reason: service.label });
       return json(res, 200, savedSchedule);
     }
+    if (req.method === 'POST' && url.pathname === '/api/schedule-route-incident') {
+      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });
+      let body = '';
+      for await (const chunk of req) { body += chunk; if (body.length > 8192) return json(res, 413, { error: 'Слишком большой запрос' }); }
+      const input = JSON.parse(body);
+      if (!network.byId.has(input.routeId) || !['fwd', 'rev', 'all'].includes(input.dir) || !Number.isFinite(input.minutes) || input.minutes < 15 || input.minutes > 720) return json(res, 400, { error: 'Проверьте маршрут, направление и длительность 15–720 минут' });
+      const from = state.now;
+      applyScheduleIncident({ id: `route:${from}:${input.routeId}:${input.dir}`, routeId: input.routeId, dir: input.dir, from, until: from + input.minutes * 60000, reason: `Запрет отправлений: ${network.byId.get(input.routeId).name}, ${input.dir === 'all' ? 'оба направления' : input.dir === 'fwd' ? 'прямое направление' : 'обратное направление'}` });
+      return json(res, 200, savedSchedule);
+    }
     if (req.method === 'GET' && url.pathname === '/api/schedule') return json(res, 200, savedSchedule);
     if (req.method === 'POST' && url.pathname === '/api/schedule') {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'Недопустимый источник запроса' });

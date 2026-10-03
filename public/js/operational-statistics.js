@@ -4,6 +4,7 @@ import { Button, Kpi } from './ui.js';
 import { useLiveSchedule } from './schedule-live.js';
 import { operationalMetrics, fleetStandingMetrics } from './operational-metrics.js';
 import { ECONOMIC_REFERENCE } from './economic-reference.js';
+import { MODEL_FACTORS, DISPLAY_ONLY_FACTORS, MISSING_FACTORS } from './model-factors.js';
 
 const fmt = n => Number(n.toFixed(1)).toLocaleString('ru-RU');
 export function OperationalStatistics({ trains, events }) {
@@ -46,5 +47,9 @@ export function OperationalStatistics({ trains, events }) {
     ${fleet ? html`<p class="muted">Окно: ${new Date(fleet.start).toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })} — ${new Date(fleet.end).toLocaleString('ru-RU', { timeZone: 'Asia/Almaty' })}. ${fleet.coverage}</p>${cards(planned)}
       <p>Режим расчёта: тепловозы в доступном резерве остаются заведёнными (${rates.dieselLitresH} л/ч), электровозы потребляют ${rates.electricKwhH} кВт на собственные нужды. Расход в ремонте не включён. Ставки меняются в «Расписаниях».</p>
       <details><summary>Самые долгие межрейсовые стоянки — первые 20</summary><ul class="plain-list">${fleet.idle.slice(0, 20).map(l => html`<li key=${l.id}>${l.series} · ${l.id}: ${fmt(l.hours)} ч, назначений ${l.assignments}</li>`)}</ul></details>` : html`<p>Загрузка плана…</p>`}
-  </section>`;
+  </section><section class="panel"><div class="panel-head"><div><h2>Какие факторы учитывает модель</h2><small>${MODEL_FACTORS.length} групп правил и расчётов в сетевой модели, планировщике и экономике. Это не ${MODEL_FACTORS.length} независимых физических проверок безопасности.</small></div></div><div class="tab-panel">
+    <details><summary>Полный список работающих правил</summary><ol>${MODEL_FACTORS.map(([scope, name, description]) => html`<li key=${name}><strong>${scope} · ${name}.</strong> ${description}</li>`)}</ol></details>
+    <details><summary>Показываются в паспорте, но не все ограничивают назначение</summary><ul>${DISPLAY_ONLY_FACTORS.map(name => html`<li>${name}</li>`)}</ul></details>
+    <details><summary>Что ещё нужно связать с решениями</summary><ul>${MISSING_FACTORS.map(name => html`<li>${name}</li>`)}</ul></details>
+  </div></section>`;
 }
