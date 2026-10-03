@@ -4,6 +4,7 @@ import { go } from './store.js';
 import { Button, PageHeader } from './ui.js';
 import { ProblemDemo, Factors, ModelFlow } from './how-problem.js';
 import { AlgorithmStepper, Sandbox, Cases, StationLifecycle } from './how-engine.js';
+import { MODEL_FACTORS, DISPLAY_ONLY_FACTORS, MISSING_FACTORS, FACTOR_AUDIT_DATE } from './model-factors.js';
 
 const SECTIONS = [
   { id: 'problem', icon: 'siren', title: 'Проблема' },
@@ -59,8 +60,13 @@ export function HowPage() {
           <${ModelFlow} /></${Section}>
 
         <${Section} id="factors" icon="sliders-horizontal" eyebrow="Данные" title="Какие факторы учитывает система"
-          lead="Шесть вещей определяют, кто пойдёт первым и сколько он потеряет. Каждая карточка показывает один фактор в движении.">
-          <${Factors} /></${Section}>
+          lead=${`${MODEL_FACTORS.length} групп правил и расчётов, проверено по коду ${FACTOR_AUDIT_DATE}. Сначала шесть наглядных примеров участка, затем полный перечень по подсистемам.`}>
+          <${Factors} />
+          <div class="panel pad"><h3>Полный перечень факторов</h3><p>Область действия указана у каждого пункта. Правила детального участка нельзя автоматически переносить на все физические пути сети. Сетевой план назначений пока используется для прогноза, его автоматическое исполнение отключено.</p>
+            <ol>${MODEL_FACTORS.map(([scope, name, description]) => html`<li key=${name}><strong>${scope} · ${name}.</strong> ${description}</li>`)}</ol>
+            <h4>Паспортные показатели, не самостоятельные ограничения назначения</h4><ul>${DISPLAY_ONLY_FACTORS.map(x => html`<li>${x}</li>`)}</ul>
+            <h4>Ещё не связаны с решениями в полном объёме</h4><ul>${MISSING_FACTORS.map(x => html`<li>${x}</li>`)}</ul>
+          </div></${Section}>
 
         <${Section} id="algorithm" icon="split" eyebrow="Решение" title="Шесть шагов от события до уведомления"
           lead="Это тот же движок, что считает рабочий экран. Нажимайте на шаги или смотрите автоматически: диаграмма построена на реальных нитках из учебного графика.">

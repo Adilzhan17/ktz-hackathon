@@ -9,10 +9,15 @@ import { DispatcherPanel } from './panel.js';
 import { NetworkTrains, NetworkStations } from './network-lists.js';
 import { IncidentPanel, Scenarios, PassengerNotices, AttentionCard, LateList } from './decisions.js';
 import { NetworkDispatcher } from './network-dispatcher.js';
+import { useSim } from './network-data.js';
 
 const stationName = (data, i) => data.stations[i].name;
 
 export function Overview({ data }) {
+  const sim = useSim();
+  const [routeId, setRouteId] = useState('corridor');
+  const routeSelect = html`<div class="panel panel-head"><label class="schedule-field"><span>Маршрут диспетчера</span><select aria-label="Маршрут диспетчера" value=${routeId} onChange=${e => setRouteId(e.target.value)}><option value="corridor">${data.stations[0].name} — ${data.stations.at(-1).name} · детальный участок</option>${(sim?.routes || []).map(r => html`<option key=${r.id} value=${r.id}>${r.name}</option>`)}</select></label></div>`;
+  if (routeId !== 'corridor') return html`<${PageHeader} title="Оперативная обстановка" subtitle="Движение и операции выбранного маршрута" />${routeSelect}<${NetworkDispatcher} key=${routeId} data=${data} routeId=${routeId} />`;
   const late = data.trains.filter(t => t.delay > 0);
   const passengerLate = data.trains.filter(t => t.category === 'passenger' && t.delay > 0);
   const worst = passengerLate.reduce((m, t) => Math.max(m, t.delay), 0);
@@ -23,10 +28,10 @@ export function Overview({ data }) {
   const serviced = data.trains.filter(t => t.techState.status === 'на ТО').length;
   const soon = data.trains.filter(t => t.techState.status === 'скоро ТО').length;
   const broken = data.trains.filter(t => t.broken).length;
-  return html`<${NetworkDispatcher} /><${PageHeader} title="Оперативная обстановка"
+  return html`<${PageHeader} title="Оперативная обстановка"
       subtitle=${`${stationName(data, 0)} ↔ ${stationName(data, data.stations.length - 1)} · ${data.stations.length} станций · двухпутный участок с автоблокировкой`}
       actions=${html`<a class="btn btn-secondary" href=${href('/map')}><${Icon} name="map-pin" size=${17} />Карта участка</a><${Button} variant="primary" icon="construction" onClick=${() => go('/decisions')}>Ввести событие</${Button}>`} />
-    <section class="panel map-panel" aria-labelledby="map-title">
+    ${routeSelect}<section class="panel map-panel" aria-labelledby="map-title">
       <div class="panel-head"><div><h2 id="map-title">Схема участка в реальном времени</h2>
         <small>Время идёт в реальном ходе; поезда, ТО, вагоны и происшествия создаются сами. Сверху нечётный путь (←), снизу чётный (→).</small></div></div>
       <${TrackMap} data=${data} />

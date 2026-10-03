@@ -81,7 +81,7 @@ export function allocateTrips(trips, fleet, config, optimized = true, constraint
     rows.push({ ...t, status: 'assigned', locoId: loco.id, assignedSeries: loco.series, traction: loco.type, departure, arrival,
       couplingAt: departure - config.couplingMin * 60000, locoReady: loco.ready, waitMin, search,
       timing: { scheduled: t.departedMs, readyWithPreparation: loco.ready + config.couplingMin * 60000, headwaySlot: departure > Math.max(t.departedMs, loco.ready + config.couplingMin * 60000) ? departure : null,
-        constraints: constraints.filter(c => (c.locoId ? c.locoId === loco.id : c.routeId === t.routeId) && c.until > t.departedMs && c.from < arrival).map(c => ({ reason: c.reason, from: c.from, until: c.until })) },
+        constraints: constraints.filter(c => (c.locoId ? c.locoId === loco.id : c.routeId === t.routeId && (!c.dir || c.dir === 'all' || c.dir === t.dir)) && c.until > t.departedMs && c.from < arrival).map(c => ({ reason: c.reason, from: c.from, until: c.until })) },
       idleMin: Math.max(0, (departure - config.couplingMin * 60000 - loco.ready) / 60000),
       reason: `${loco.series} на ${t.from}; допустимая масса в настройках ${loco.maxT} т ≥ ${t.consist.grossT} т; ${loco.origin}. ${optimized ? 'Раннее отправление с наиболее близкой готовностью тяги.' : 'Закреплён по очереди готовности.'}` });
     loco.station = t.to; loco.ready = arrival + config.turnaroundMin * 60000;

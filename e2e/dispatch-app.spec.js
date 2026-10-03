@@ -4,12 +4,14 @@ test('national dispatcher selects route and train, station post and phone stay u
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto('/#/overview');
   await page.getByLabel('Маршрут диспетчера', { exact: true }).selectOption('ARK-AST');
-  await expect(page.getByRole('img', { name: /Схема маршрута Аркалык/ })).toBeVisible();
-  await page.locator('.dispatch-train').first().click();
+  await expect(page.getByRole('heading', { name: 'Схема участка в реальном времени' })).toHaveCount(1);
+  await expect(page.locator('.map-panel .minimap')).toBeVisible();
+  await expect(page.locator('.dispatch-diagram')).toHaveCount(0);
+  await page.locator('.map-panel .mtrain').first().click();
   await expect(page.getByRole('dialog', { name: /Поезд №/ })).toBeVisible();
   await page.keyboard.press('Escape');
   await page.getByRole('radio', { name: 'Прямое →', exact: true }).click();
-  await expect(page.locator('.dispatch-train').first()).toBeVisible();
+  await expect(page.locator('.map-panel .mtrain').first()).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: '/tmp/ktz-dispatch-tested-phone.png' });

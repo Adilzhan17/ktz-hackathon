@@ -55,6 +55,7 @@ export function prepare(data) {
       }
     }
   }
+  for (const service of services) serviceNetworks.set(service, services);
   return { routes, services, byId: new Map(routes.map(r => [r.id, r])) };
 }
 
@@ -74,10 +75,39 @@ function pickStops(route, spec, dir) {
 }
 
 const profiles = new WeakMap();
+const rawProfiles = new WeakMap();
+const serviceNetworks = new WeakMap();
+const repairDays = new WeakMap();
+export const NETWORK_REPAIRS_PER_DAY = 8; // ещё 2 автоматических события зарезервированы детальному участку
+
+// Quota is selected by actual occurrence day (Almaty), not departure day or UI query order.
+function repairAllowed(service, uid, at) {
+  const services = serviceNetworks.get(service) || [service];
+  let days = repairDays.get(services);
+  if (!days) { days = new Map(); repairDays.set(services, days); }
+  const day = Math.floor(at / 1440);
+  if (!days.has(day)) {
+    const candidates = [];
+    for (const s of services) {
+      const lo = Math.ceil((day * 1440 - s.tMax - s.phase) / s.period);
+      const hi = Math.floor(((day + 1) * 1440 - s.phase) / s.period);
+      for (let m = lo; m <= hi; m++) {
+        const id = `${s.id}@${m}`, dep = s.phase + m * s.period;
+        const p = profileOf(s, id, true);
+        if (p.legs.some(l => l.reason === 'устранение неисправности' && Math.floor((dep + l.t) / 1440) === day)) candidates.push(id);
+      }
+    }
+    candidates.sort((a, b) => hash(`repair:${a}`) - hash(`repair:${b}`) || a.localeCompare(b));
+    if (days.size >= 32) days.delete(days.keys().next().value);
+    days.set(day, new Set(candidates.slice(0, NETWORK_REPAIRS_PER_DAY)));
+  }
+  return days.get(day).has(uid);
+}
 /** Расписание одного рейса: остановки с временем прибытия и стоянкой, с учётом случайной задержки. */
-function profileOf(service, uid) {
-  let cache = profiles.get(service);
-  if (!cache) { cache = new Map(); profiles.set(service, cache); }
+function profileOf(service, uid, raw = false) {
+  const caches = raw ? rawProfiles : profiles;
+  let cache = caches.get(service);
+  if (!cache) { cache = new Map(); caches.set(service, cache); }
   const cached = cache.get(uid);
   if (cached) return cached;
   const spec = CATEGORIES[service.cat];
@@ -92,6 +122,16 @@ function profileOf(service, uid) {
   const legs = []; // [tArrive, km, dwell, reason, planned]
   let t = 0, km = 0;
   const speed = service.route.km / service.run * 60; // км/ч в движении
+  if (!raw && holdAt >= 0 && stops[holdAt].reason === 'устранение неисправности') {
+    const original = profileOf(service, uid, true);
+    const dep = service.phase + Number(uid.slice(uid.lastIndexOf('@') + 1)) * service.period;
+    if (!repairAllowed(service, uid, dep + original.legs[holdAt].t)) {
+      stops[holdAt].dwell -= extra;
+      stops[holdAt].planned = true;
+      stops[holdAt].reason = 'плановая стоянка';
+      extra = 0; holdAt = -1;
+    }
+  }
   const pre = (h >>> 3) % 200;                 // сколько бригада уже отработала к отправлению, мин
   const limit = 480; // Плановая смена 8 ч; настройка модели, не универсальный норматив.
   let worked = pre;

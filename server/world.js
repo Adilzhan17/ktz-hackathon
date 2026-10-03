@@ -399,12 +399,17 @@ export function autoEvents(state, dtMin) {
   let changed = false;
   const chance = rate => 1 - Math.exp(-rate * mult * dtMin / 60);
   const t = nowMinutes(state);
+  const day = dayStart(state.now);
+  if (state.autoBreakdownBudget?.day !== day) {
+    state.autoBreakdownBudget = { day, count: state.incidents.filter(i => i.kind === 'breakdown' && i.auto && i.createdAt >= day).length };
+  }
   const onLine = () => state.trains.filter(tr => {
     const here = locateAt(getPlan(state).byTrain[tr.number].forecast, t);
     return (here.kind === 'move' || here.kind === 'wait') && !state.incidents.some(i => i.train === tr.number);
   });
   const levelOf = { minor: 1, medium: 2, serious: 3, critical: 4 };
   for (const [name, level] of Object.entries(levelOf)) {
+    if (state.autoBreakdownBudget.count >= 2) break;
     if (rand(state) >= chance(RATES[name])) continue;
     const candidates = onLine();
     if (!candidates.length) continue;
@@ -413,6 +418,7 @@ export function autoEvents(state, dtMin) {
     const types = Object.entries(BREAKDOWN_TYPES).filter(([, v]) => v.levels.includes(level)).map(([k]) => k);
     try {
       const inc = createBreakdown(state, train.number, level, types[Math.floor(rand(state) * types.length)], { auto: true });
+      state.autoBreakdownBudget.count += 1;
       event(state, `Поломка: ${inc.label}. ${BREAKDOWN_LEVELS[level].text}`);
       changed = true;
     } catch { /* поезд уже сошёл с линии */ }

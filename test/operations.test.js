@@ -4,10 +4,44 @@ import { readFileSync } from 'node:fs';
 import { prepare, scheduledTrips, networkTrains, networkEvents, setNetworkPlan, networkStats } from '../public/js/network-sim.js';
 import { operationalMetrics, fleetStandingMetrics } from '../public/js/operational-metrics.js';
 import { scheduleEconomics, allocateTrips, SCHEDULE_DEFAULTS } from '../public/js/schedule-engine.js';
+import { networkTrackData } from '../public/js/network-track-data.js';
+
+test('national schematic preserves positions, direction and unknown infrastructure', () => {
+  const sim = prepare(data), trains = networkTrains(sim, now), route = sim.byId.get(trains[0].routeId);
+  const selected = trains.filter(t => t.routeId === route.id);
+  const mapped = networkTrackData({ baseTime: now }, route, selected, now);
+  assert.equal(mapped.trains.length, selected.length);
+  assert.equal(mapped.stations[0].km, 0);
+  assert.equal(mapped.stations.at(-1).km, route.km);
+  assert.ok(mapped.stations.every(s => s.capacity === null && !s.tracks.length));
+  for (const t of mapped.trains) {
+    const i = Math.min(mapped.stations.length - 2, Math.floor(t.diagramPosition)), f = t.diagramPosition - i;
+    const km = mapped.stations[i].km + f * (mapped.stations[i + 1].km - mapped.stations[i].km);
+    const expected = t.network.dir === 'rev' ? route.km - t.network.km : t.network.km;
+    assert.ok(Math.abs(km - expected) < .001);
+    assert.equal(t.direction, t.network.dir === 'rev' ? 'odd' : 'even');
+  }
+});
 
 const hour = 3600000;
 const data = JSON.parse(readFileSync(new URL('../public/data/kz-routes.json', import.meta.url)));
 const now = Date.parse('2026-10-03T04:00:00Z');
+
+test('network repairs are capped by occurrence day and deterministic across restarts and query order', () => {
+  const start = Date.parse('2026-10-01T19:00:00Z');
+  const sim = prepare(data), fresh = prepare(data);
+  for (const day of [2, 0, 1]) {
+    const end = start + (day + 1) * 24 * hour - 1;
+    const repairs = networkEvents(sim, end, 1440).filter(e => e.kind === 'repair');
+    assert.ok(repairs.length <= 8, `day ${day}: ${repairs.length}`);
+    assert.ok(repairs.length > 0);
+    assert.deepEqual(repairs.map(e => e.id), networkEvents(fresh, end, 1440).filter(e => e.kind === 'repair').map(e => e.id));
+    for (const event of repairs) {
+      const t = networkTrains(sim, event.at + 60000).find(t => t.uid === event.uid);
+      assert.equal(t?.reason, 'устранение неисправности');
+    }
+  }
+});
 
 test('applied schedule delays movement, station departure and events together', () => {
   const sim = prepare(data), trip = scheduledTrips(sim, now, now + hour)[0];

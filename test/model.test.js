@@ -2,6 +2,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createState, act, snapshot, advanceTime, tick, groupView, SPEEDS } from '../server/model.js';
 import { nowMinutes } from '../server/dispatch.js';
+import { autoEvents, dayStart } from '../server/world.js';
+
+test('corridor automatic repair quota survives saved state and rolls over only at Almaty midnight', () => {
+  const state = createState({ auto: { stations: true, intensity: 'high', approve: true } });
+  state.autoBreakdownBudget = { day: dayStart(state.now), count: 2 };
+  const restored = JSON.parse(JSON.stringify(state));
+  const count = restored.incidents.filter(i => i.kind === 'breakdown').length;
+  for (let i = 0; i < 50; i++) autoEvents(restored, 1);
+  assert.equal(restored.incidents.filter(i => i.kind === 'breakdown').length, count);
+  assert.equal(restored.autoBreakdownBudget.count, 2);
+  restored.now = dayStart(restored.now) + 86400000;
+  autoEvents(restored, 0);
+  assert.equal(restored.autoBreakdownBudget.count, 0);
+});
 
 const quiet = () => createState({ auto: { stations: false, intensity: 'off', approve: false } });
 const minutesNow = sn => (sn.now - sn.baseTime) / 60000;
