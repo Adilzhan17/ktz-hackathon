@@ -10,6 +10,7 @@ import { StationPage } from './station.js';
 import { LogPage } from './log.js';
 import { ModelPage } from './model.js';
 import { StatsPage } from './stats.js';
+import { EnginePage } from './engine-lab.js';
 import { SchedulesPage } from './schedules.js';
 import { FleetPage } from './fleet.js';
 import { NetworkPage } from './network-map.js';
@@ -23,6 +24,7 @@ const NAV = [
   { page: 'trains', path: '/trains', label: 'Поезда', icon: 'train-front' },
   { page: 'stations', path: '/stations', label: 'Станции', icon: 'building-2', also: ['station'] },
   { page: 'model', path: '/model', label: 'Решения модели', icon: 'lightbulb' },
+  { page: 'engine', path: '/engine', label: 'Модель', icon: 'cpu' },
   { page: 'stats', path: '/stats', label: 'Статистика', icon: 'trending-up' },
   { page: 'schedules', path: '/schedules', label: 'Расписания', icon: 'calendar-clock' },
   { page: 'log', path: '/log', label: 'Журнал', icon: 'list-checks' },
@@ -31,7 +33,7 @@ const NAV = [
   { page: 'how', path: '/how', label: 'Как это работает', icon: 'book-open' },
   { page: 'developers', path: '/developers', label: 'Разработчикам', icon: 'activity' },
 ];
-const TITLES = { developers: 'Разработчикам', schedules: 'Расписания', network: 'Карта сети', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', stats: 'Статистика', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
+const TITLES = { developers: 'Разработчикам', schedules: 'Расписания', network: 'Карта сети', fleet: 'Парк и сеть', map: 'Карта участка', overview: 'Обстановка', decisions: 'Решения', model: 'Решения модели', engine: 'Модель', stats: 'Статистика', trains: 'Поезда', stations: 'Станции', station: 'Станция', log: 'Журнал', how: 'Как это работает' };
 
 function Nav({ page, onAbout, attention, mini, onMini }) {
   const more = useRef(null);
@@ -99,6 +101,7 @@ function App() {
     decisions: html`<${DecisionsPage} data=${data} />`,
     model: html`<${ModelPage} data=${data} />`,
     stats: html`<${StatsPage} data=${data} />`,
+    engine: html`<${EnginePage} />`,
     schedules: html`<${SchedulesPage} />`,
     developers: html`<${DevelopersPage} />`,
     how: html`<${HowPage} />`,

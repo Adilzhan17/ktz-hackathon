@@ -1,0 +1,40 @@
+/* Страница «Модель» */
+.engine-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; margin-top: 18px; }
+.engine-two > * { min-width: 0; }
+@media (max-width: 1000px) { .engine-two { grid-template-columns: 1fr; } }
+
+.neural { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: radial-gradient(circle at 20% 10%, #f4fafc, #fff 60%); }
+.neural svg { display: block; }
+.nn-layer { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; fill: var(--text-3); }
+.nn-particle { fill: var(--accent); opacity: .85; }
+.nn-edge.dim .nn-particle { opacity: .15; }
+.nn-node { cursor: pointer; outline: none; transition: opacity .2s; }
+.nn-node.dim { opacity: .3; }
+.nn-core { fill: var(--accent); stroke: #fff; stroke-width: 2; transition: r .6s ease, opacity .6s ease; }
+.nn-core.calc { fill: #1f6fa3; } .nn-core.judge { fill: #0b2a3c; } .nn-core.out { fill: #3c9a73; }
+.nn-ring { fill: none; stroke: var(--accent); stroke-width: 2; opacity: 0; }
+.nn-node.sel .nn-core { stroke: var(--text); stroke-width: 3; }
+.nn-node:focus-visible .nn-core { stroke: var(--text); stroke-width: 3; }
+.nn-label { font-size: 12px; font-weight: 600; fill: var(--text); }
+.nn-num { font-size: 11px; fill: var(--text-3); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) { .nn-ring { animation: nn-ping 1s ease-out; } @keyframes nn-ping { from { opacity: .7; r: 12; } to { opacity: 0; r: 34; } } }
+@media (prefers-reduced-motion: reduce) { .nn-particle { display: none; } }
+.nn-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px 24px; align-items: center; padding: 14px 16px; margin-top: 12px; border: 1px solid var(--accent-line); border-radius: var(--radius-s); background: var(--accent-bg); }
+.nn-detail p { margin: 4px 0 8px; color: var(--text-2); max-width: 62ch; } .nn-detail code { font-size: var(--text-sm); color: var(--accent-ink, #0b4a63); }
+.nn-spark { display: grid; gap: 4px; justify-items: end; } .nn-spark b { font-size: 22px; } .nn-spark small { color: var(--text-3); }
+
+.stream { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 480px; overflow: hidden; font-size: var(--text-sm); }
+.stream-line { display: grid; grid-template-columns: 64px auto 1fr; gap: 10px; align-items: baseline; padding: 6px 8px; border-radius: var(--radius-s); background: var(--surface-2); }
+.stream-line time { color: var(--text-3); font-variant-numeric: tabular-nums; } .stream-line span { overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) { .stream-line:first-child { animation: stream-in .4s ease-out; } @keyframes stream-in { from { opacity: 0; transform: translateY(-6px); } } }
+.spark-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.spark-card { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-s); } .spark-card span { color: var(--text-3); font-size: var(--text-sm); } .spark-card strong { font-size: 20px; }
+.spark { display: block; max-width: 100%; }
+.heat { display: grid; gap: 3px; overflow-x: auto; }
+.heat-row { display: grid; grid-template-columns: 170px repeat(24, minmax(10px, 1fr)) 40px; gap: 2px; align-items: center; min-width: 560px; }
+.heat-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .heat-h { font-size: 10px; color: var(--text-3); text-align: left; } .heat-t { font-size: 11px; text-align: right; color: var(--text-3); }
+.heat-c { display: block; height: 16px; border-radius: 3px; background: var(--accent); }
+.spec { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 22px; }
+.spec section { min-width: 0; } .spec h3 { margin: 0 0 8px; } .spec dl { margin: 0; display: grid; gap: 6px; }
+.spec-row { display: grid; grid-template-columns: minmax(120px, 40%) 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); } .spec-row dt { color: var(--text-3); font-size: var(--text-sm); } .spec-row dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.spec section.wide { grid-column: 1 / -1; }

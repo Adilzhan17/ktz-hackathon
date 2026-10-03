@@ -62,7 +62,7 @@ export function parseHash(hash = location.hash) {
   const params = Object.fromEntries(new URLSearchParams(query));
   if (!parts.length) return { page: 'network', params };
   if (parts[0] === 'station') return { page: 'station', params: { ...params, id: parts[1], tab: parts[2] || 'tracks' } };
-  if (['trains', 'stations', 'log', 'decisions', 'how', 'map', 'fleet', 'overview', 'model', 'stats', 'schedules', 'developers'].includes(parts[0])) return { page: parts[0], params };
+  if (['trains', 'stations', 'log', 'decisions', 'how', 'map', 'fleet', 'overview', 'model', 'engine', 'stats', 'schedules', 'developers'].includes(parts[0])) return { page: parts[0], params };
   return { page: 'network', params };
 }
 export const href = (path = '/') => `#${path}`;

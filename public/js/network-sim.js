@@ -3,6 +3,7 @@
 // Маршруты — реальные пути по OpenStreetMap (public/data/kz-routes.json); расписание синтетическое.
 const TZ = 300; // Asia/Almaty, минут от UTC
 import { countComputation } from './computation-metrics.js';
+export const CREW_LIMIT_MIN = 480; // Плановая смена 8 ч; настройка модели, не универсальный норматив.
 const executionPlans = new WeakMap();
 export function setNetworkPlan(sim, plan) {
   if (!plan?.executionEnabled) { executionPlans.delete(sim); return; }
@@ -135,7 +136,7 @@ function profileOf(service, uid, raw = false) {
     }
   }
   const pre = (h >>> 3) % 200;                 // сколько бригада уже отработала к отправлению, мин
-  const limit = 480; // Плановая смена 8 ч; настройка модели, не универсальный норматив.
+  const limit = CREW_LIMIT_MIN;
   let worked = pre;
   stops.forEach((s, i) => {
     const travel = (s.km - km) / speed * 60;
@@ -739,3 +740,16 @@ export function networkDecisions(trains) {
   }
   return out.sort((a, b) => b.ownCost - a.ownCost);
 }
+
+/** Параметры модели для страницы «Модель»: всё, что определяет расчёт, в одном месте. */
+export const MODEL_PARAMS = {
+  weights: WEIGHT,
+  headwayMin: { same: HEAD_SAME, opposite: HEAD_OPPOSITE },
+  wrongTrackKmh: WRONG_TRACK_KMH,
+  crewLimitMin: CREW_LIMIT_MIN,
+  repairsPerDay: NETWORK_REPAIRS_PER_DAY,
+  averageKmh: { passengerElectric: 92, passengerDiesel: 76, container: 60, freight: 44 },
+  categories: CATEGORIES,
+  variants: INCIDENT_VARIANTS,
+  tz: TZ,
+};
